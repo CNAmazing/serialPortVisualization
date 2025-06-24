@@ -35,36 +35,60 @@ def read_and_split_by_equal(filename):
     except Exception as e:
         print(f"读取文件时发生错误: {e}")
         return None
-
-
-# 使用示例
-if __name__ == "__main__":
-    file_path = "ReceivedTofile-COM3-2025_6_9_15-35-38.txt"  # 替换为你的文件路径
-    parsed_data = read_and_split_by_equal(file_path)
-    newGain=[]
-    curGain=[]
-    newExposure=[]
-    curExposure=[]
-    if parsed_data:
-        for key, value in parsed_data:
+def generateDict(keyList):
+    dataDict={}
+    for key in keyList:
+        
+        dataDict[key]=[]
+    return dataDict
+def updateDict(dataDict,parsedData):
+    if not parsed_data:
+        raise ValueError('parsedData为空')
+    for key,value in parsedData:
+        try:
             value=float(value)
-            match key:
-                case 'curExposure':
-                    curExposure.append(value)
-                case 'newExposure':
-                    newExposure.append(value)
-                case 'curGain':
-                    curGain.append(value)
-                case 'newGain':
-                    newGain.append(value)
-    # errorExposure=np.array(newExposure)-np.array(curExposure)
-    
+            if key in dataDict:
+                dataDict[key].append(value)
+        except:
+            pass
+def pltSingleImage(dataDict):
     plt.figure(figsize=(12, 8))
-    plt.plot(newExposure, marker='o', linestyle='-', color='r')
-    plt.plot(curExposure, marker='o', linestyle='-', color='b')
-    
+    for i, (key,value) in enumerate(dataDict.items()):
+        plt.plot(value, marker='o', linestyle='-', label=f" {key}")
+        # plt.plot(dataDict.values[1], marker='o', linestyle='-', color='b')
+        # 在每个数据点上标注数值
+        for x, y in enumerate(value):
+            plt.text(x, y, f"{x,y}", ha='center', va='bottom')  
     # plt.title(title)
     # plt.xlabel(xlabel)
     # plt.ylabel(ylabel)
     # plt.grid(True, linestyle='--', alpha=0.5)
+    plt.legend()
     plt.show()
+def pltMultiImage(dataDict):
+    fig, axes = plt.subplots(1, len(dataDict), figsize=(16, 8))
+    if len(dataDict) == 1:
+        axes = [axes]  
+    for ax, (name, value), color in zip(axes, dataDict.items(), plt.cm.tab10.colors):
+        line, = ax.plot(value,marker='o', linestyle='-' ,label=name, color=color)
+        for x, y in enumerate(value):
+            if x==0:
+             ax.text(x, y, f"{x,y}", ha='center', va='bottom')  
+
+            if x>=1 and value[x-1]!=y:
+             ax.text(x, y, f"{x,y}", ha='center', va='bottom')  
+        # ax.set_title(name)
+        ax.set_xlabel("time")
+        # ax.set_ylabel(f"{name}")
+        ax.legend()
+    plt.show()
+# 使用示例
+if __name__ == "__main__":
+    file_path = "SAVE2025_6_19_14-41-51.DAT"  # 替换为你的文件路径
+    parsed_data = read_and_split_by_equal(file_path)
+    keyList=['curExposure','newExposure','curGain','newGain']
+    dataDict=generateDict(keyList)
+    updateDict(dataDict,parsed_data)
+    # errorExposure=np.array(newExposure)-np.array(curExposure)
+    pltSingleImage(dataDict)
+    pltMultiImage(dataDict)

@@ -1,10 +1,12 @@
 import serial
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
-import matplotlib as mpl
+import pyqtgraph as pg
+from pyqtgraph.Qt import QtCore
 import time
-# 设置中文字体
-mpl.rcParams['font.family'] = 'Microsoft YaHei'
+import sys
+
+# 设置中文显示（需要系统有中文字体）
+pg.setConfigOption('background', 'w')
+pg.setConfigOption('foreground', 'k')
 
 # 初始化串口
 ser = None
@@ -20,54 +22,47 @@ try:
     print(f"串口状态: {ser.is_open}")
 except Exception as e:
     print(f"初始化错误: {e}")
-    exit()
+    sys.exit()
 
 # 配置参数
-MAX_POINTS =  1000# 限制显示的数据点数
-PLOT_INTERVAL = 50 # 绘图间隔(ms)
+MAX_POINTS = 1000  # 限制显示的数据点数
+PLOT_INTERVAL = 50  # 绘图间隔(ms)
 
 # 数据存储
 data_dict = {
     'newGain': [],
-    'curGain': [],
-    'newExposure': [],
-    'curExposure': [],
-    # 'gainDistance': [],
-    # 'averageG': [],
     'avgL': [],
-    # 'avgR': [],
-    # 'avgG': [],
-    # 'avgB': [],
-    # 'expStability.stableFrameCount': [],
-    # 'GainR': [],
-    # 'GainG': [],
-    # 'GainB': [],
-    
+    'avgR': [],
+    'avgG': [],
+    'avgB': [],
 }
 timestamps = []
 
-# 创建图形
-fig, axes = plt.subplots(1, len(data_dict), figsize=(16, 8))
-if len(data_dict) == 1:
-    axes = [axes]  # 确保axes总是列表
-fig.suptitle("实时数据可视化", fontsize=14)
+# 创建Qt应用
+app = pg.mkQApp("Serial Data Monitor")
 
-# 初始化曲线
-lines = []
-for ax, (name, _), color in zip(axes, data_dict.items(), plt.cm.tab10.colors):
-    line, = ax.plot([], [], label=name, color=color)
-    lines.append(line)
-    ax.set_title(name)
-    ax.set_xlabel("时间")
-    ax.set_ylabel("数值")
-    ax.legend()
-    ax.grid(True)
-plt.tight_layout()
+# 创建主窗口
+win = pg.GraphicsLayoutWidget(title="实时数据可视化", size=(1200, 800))
+win.show()
+
+# 创建子图
+plots = []
+curves = []
+for i, name in enumerate(data_dict.keys()):
+    if i > 0:
+        win.nextRow()
+    plot = win.addPlot(title=name)
+    plot.showGrid(x=True, y=True)
+    plot.setLabel('left', '数值')
+    plot.setLabel('bottom', '时间', 's')
+    curve = plot.plot(pen=pg.mkPen(color=pg.intColor(i), width=2))
+    plots.append(plot)
+    curves.append(curve)
 
 # 初始化时间戳
 start_time = None
 
-def update(frame):
+def update():
     global start_time
     
     try:
@@ -108,32 +103,26 @@ def update(frame):
         
         # 更新所有曲线
         if timestamps:
-            for line, data in zip(lines, data_dict.values()):
-                line.set_data(timestamps[-len(data):], data[-len(data):])
-            
-            # 自动调整坐标轴范围
-            for ax in axes:
-                ax.relim()
-                ax.autoscale_view(True, True, True)
-        return lines
+            for curve, data in zip(curves, data_dict.values()):
+                curve.setData(timestamps[-len(data):], data[-len(data):])
     
     except serial.SerialException as e:
         print(f"通信错误: {e}")
-        ani.event_source.stop()
-        return lines
+        timer.stop()
+        if ser and ser.is_open:
+            ser.close()
+            print("串口已关闭")
 
-# 创建动画
-ani = FuncAnimation(
-    fig, 
-    update, 
-    interval=PLOT_INTERVAL, 
-    blit=False,
-    cache_frame_data=False,
-)
+# 创建定时器
+timer = QtCore.QTimer()
+timer.timeout.connect(update)
+timer.start(PLOT_INTERVAL)
 
-try:
-    plt.show()
-finally:
-    if ser and ser.is_open:
-        ser.close()
-        print("串口已关闭")
+# 启动应用
+if __name__ == '__main__':
+    try:
+        pg.exec()
+    finally:
+        if ser and ser.is_open:
+            ser.close()
+            print("串口已关闭")
