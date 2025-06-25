@@ -84,11 +84,12 @@ def pltMultiImage(dataDict):
     plt.show()
 # 使用示例
 if __name__ == "__main__":
-    file_path = "SAVE2025_6_19_14-41-51.DAT"  # 替换为你的文件路径
+    file_path = r"C:\serialPortVisualization\AEdata0625\SAVE2025_6_25_15-14-42.DAT"  # 替换为你的文件路径
     parsed_data = read_and_split_by_equal(file_path)
-    keyList=['curExposure','newExposure','curGain','newGain']
+    # keyList=['curExposure','newExposure','curGain','newGain',"avgL"]
+    keyList=['curExposure','curGain',"avgL"]
     dataDict=generateDict(keyList)
     updateDict(dataDict,parsed_data)
     # errorExposure=np.array(newExposure)-np.array(curExposure)
-    pltSingleImage(dataDict)
+    # pltSingleImage(dataDict)
     pltMultiImage(dataDict)
