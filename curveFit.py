@@ -7,8 +7,9 @@ mpl.rcParams['font.family'] = 'Microsoft YaHei'
 
 # 指数衰减函数: a * e^(-k*x) + c
 def func_exp(x, a, k, c):
-    return a * np.exp(-k * x) + c
-
+    return a * np.exp(-k * x )+ c
+def multi_exp(x, a1, k1, a2, k2, c):
+    return a1 * np.exp(-k1 * x) + a2 * np.exp(-k2 * x) + c
 # 以2为底的指数衰减函数: a * 2^(-k*x) + c 
 def func_exp2(x, a, k, c):
     return a * 2**(-k * x) + c
@@ -42,7 +43,10 @@ def curveFit(data,func):
     data = data[sorted_indices]
     x = data[:,0]
     y = data[:,1]
-    params, covariance = curve_fit(func, x, y, p0=p0)
+    params, covariance = curve_fit(func, x, y, p0=p0,maxfev=100000)  # 设置边界条件，避免参数为负值
+    param_errors = np.sqrt(np.diag(covariance))
+
+    print(f"param_errors: {param_errors}")
     param_values = {}
     for name, value in zip(fit_param_names, params):
         param_values[name] = value
@@ -57,58 +61,104 @@ def curveFit(data,func):
     plt.legend()
     plt.show()
     param_str = ", ".join([f"{name}={value:.2f}" for name, value in param_values.items()])
+    paramError_str = ", ".join([f"{name}误差={error:.2f}" for name, error in zip(fit_param_names, param_errors)])
     print(f"拟合参数: {param_str}")
-    
-def valueCal(x, a, b, c):
+    print(f"拟合误差: {paramError_str}")
+    return params
+def regularizeData(X):
+    for x in X:
+        x=int(x//1000)
+        x=x*1000
+    return X
+def valueCal(x, *params,func):
 
-    y= func(x, a, b, c)
+    y= func(x, *params)
     plt.scatter(x, y, label="拟合数据")
     for x_i, y_i in zip(x,y):
-        plt.text(x_i, y_i, f"{x_i,int(y_i)}", ha='center', va='bottom')  
+        plt.text(x_i, y_i, f"{x_i,int(y_i)}", ha='center', va='bottom')
+     # 打印每个点的坐标  
     plt.plot(x, y, 'r-', )
+    y=regularizeData(y)  # 对x进行正则化处理
+    print(f"x: {x.tolist()}")  # 打印每个点的坐标  
+
+    print(f"y: {y.astype(int).tolist()}") 
     plt.legend()
     plt.show()
 
 def main():
-    data = np.array([
-           [1, 32000],
-        [1, 26000],
-        [3, 15000],
-        [5, 8000],
-        [6, 7000],
-        [7, 5000],
-        [7, 5000],
-        [8, 5000],
-        [8, 5000],
+    # data = np.array([
+    #     [1, 32000],
+    #     [1, 26000],
+    #     [3, 15000],
+    #     [5, 8000],
+    #     [6, 7000],
+    #     [7, 5000],
+    #     [7, 5000],
+    #     [8, 5000],
+    #     [8, 5000],
 
-        [0, 41000],
-        [0, 40000],
-        [1, 26000],
-        [2, 18000],
-        [3, 14000],
-        [4, 12000],
-        [5, 8000],
-        [5, 7000],
-        [6, 7000],
-        [6, 7000],
+    #     [0, 41000],
+    #     [0, 40000],
+    #     [1, 26000],
+    #     [2, 18000],
+    #     [3, 14000],
+    #     [4, 12000],
+    #     [5, 8000],
+    #     [5, 7000],
+    #     [6, 7000],
+    #     [6, 7000],
      
-        [11, 4000],
+    #     [11, 4000],
+    #     [15, 3000],
 
+    #     [15, 3000],
+    #     [7, 5000],
+    #     [10, 4000],
+    #     [15, 3000],
+    #     [2,10000],
+    #     [5, 8000],
+    #     [5, 8000],
+    #     [7,6000],
+    #     [5, 8000],
+    #     [15,4000],
+    #     [12,4000],
+    #     [10,4000],
+    #     [5, 8000],
+    #     [7,5000],
+    #     [2,14000],
+    #     [2,10000],
+    #     [2,16725],
+    # ])
+    data=np.array([[5.2,10000],
+                  [7.4,7000],
+                  [11.2,4000],
+                  [15,3000],
+                  [18.4,2500],
+                  [23.6,2000],
+                  [13.9,5000],
+                  [9.8,6000],
+                  [1.0,23000],
+                  [1.35,25000],
+                  [11.3,5000],
+                  [10,6000],
+                  [9,6000],
+                  [1.4,20000],
+                  [0,62000],
+                  [1,56000],
+                  [2,38000]
 
-    ])
-    
-    curveFit(data,func=func_sqrt)
+                  ])
+    params=curveFit(data,func=multi_exp)
 
     """"
     计算给定x值的拟合曲线y值
     """
-    # x=[]
-    # for i in range(15):
-    #     x.append(i)
-    # print(x)
-    # x=np.array(x)
-    # a, b, c = 36876.44,0.42,3594.35
-    # valueCal(x, a, b, c)
+    x=[]
+    for i in range(26):
+        x.append(i)
+    x=np.array(x)
+    # a, b, c = 36984.00,0.41,3431.71
+    valueCal(x,*params,func=multi_exp)
 
 main()
 

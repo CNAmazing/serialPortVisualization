@@ -74,10 +74,10 @@ def pltMultiImage(dataDict,tital='tital',isSavePltImage=False):
         line, = ax.plot(value,marker='o', linestyle='-' ,label=name, color=color)
         for x, y in enumerate(value):
             if x==0:
-             ax.text(x, y, f"{x,int(y)}", ha='center', va='bottom')  
+             ax.text(x, y, f"{x,float(y)}", ha='center', va='bottom')  
 
             if x>=1 and value[x-1]!=y:
-             ax.text(x, y, f"{x,int(y)}", ha='center', va='bottom')  
+             ax.text(x, y, f"{x,float(y)}", ha='center', va='bottom')  
         # ax.set_title(name)
         ax.set_xlabel("time")
         # ax.set_ylabel(f"{name}")
@@ -89,7 +89,7 @@ def pltMultiImage(dataDict,tital='tital',isSavePltImage=False):
     plt.show()
 def singleDatInfer(file_path, title=None,isSavePltImage=False):
     parsed_data = read_and_split_by_equal(file_path)
-    keyList = ['curExposure', 'curGain', "avgL"]
+    keyList = ['curExposure', 'curGain', "avgL","avgL_d","ov50d40 fixedCCT"]
     dataDict = generateDict(keyList)
     updateDict(dataDict, parsed_data)
     pltMultiImage(dataDict, tital=title,isSavePltImage=isSavePltImage)
@@ -135,7 +135,7 @@ if __name__ == "__main__":
     # singleDatInfer(file_path)
 
 
-    full_paths,basenames = get_paths(r"C:\serialPortVisualization\data\0626_3")
+    full_paths,basenames = get_paths(r"C:\serialPortVisualization\data\0709_6")
     for path, name in zip(full_paths, basenames):
         singleDatInfer(path,name,isSavePltImage=True)
     # parsed_data = read_and_split_by_equal(file_path)
