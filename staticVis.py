@@ -2,6 +2,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import re
+from collections import defaultdict
+
 def read_and_split_by_equal(filename):
     """
     读取txt文件并按等号分割每行内容
@@ -89,7 +92,7 @@ def pltMultiImage(dataDict,tital='tital',isSavePltImage=False):
     plt.show()
 def singleDatInfer(file_path, title=None,isSavePltImage=False):
     parsed_data = read_and_split_by_equal(file_path)
-    keyList = ['curExposure', 'curGain', "avgL","avgL_d","ov50d40 fixedCCT"]
+    keyList = ['curExposure', 'newExposure','curGain',"avgL_d",'isEqualPrevExposure']
     dataDict = generateDict(keyList)
     updateDict(dataDict, parsed_data)
     pltMultiImage(dataDict, tital=title,isSavePltImage=isSavePltImage)
@@ -129,15 +132,69 @@ def get_paths(folder_name,ext=".DAT"):
         print(f"错误: {e}")
         return [], []
 
+def logVis(log_file_path):
+    frame_data = []
+    current_frame = defaultdict(str)
+    
+    # 定义要捕捉的模式
+    patterns = {
+        'avgL_d': r'avgL_d = (\d+\.\d+)',
+        'curGain': r'curGain =(\d+)',
+        'curExposure': r'curExposure =(\d+)',
+        'newExposure': r'newExposure =(\d+)',
+        'isEqualPrevExposure': r'isEqualPrevExposure =(\d+)',
+        'frame_count': r'framecnt = (\d+)',
+        # 'luma_target': r'LumaTar=(\d+)',
+        # 'current_luma': r'CurLuma=(\d+)'
+        'Converged':r'Converged = (Yes|No)'
+    }
+    
+    with open(log_file_path, 'r') as file:
+        for line in file:
+            # 检查是否是新的帧开始
+            frame_match = re.search(patterns['frame_count'], line)
+            if frame_match:
+                if current_frame:  # 如果已经有数据，保存当前帧
+                    frame_data.append(dict(current_frame))
+                    current_frame = defaultdict(str)
+                current_frame['frame_count'] = frame_match.group(1)
+            
+            # 检查其他关键信息
+            for key, pattern in patterns.items():
+                if key == 'frame_count':
+                    continue  # 已经处理过了
+                match = re.search(pattern, line)
+                if match:
+                    current_frame[key] = match.group(1)
+    
+    # 添加最后一帧数据
+    if current_frame:
+        frame_data.append(dict(current_frame))
+    
+ 
+    for i, frame in enumerate(frame_data):
+        print(f"Frame {i + 1}:")
+        for key, value in frame.items():
+            if key=="frame_count":
+                continue
+            print(f" {key}: {value}")
 # 使用示例
 if __name__ == "__main__":
     # file_path = r"C:\serialPortVisualization\data\0626\SAVE2025_6_26_9-12-39.DAT"  # 替换为你的文件路径
     # singleDatInfer(file_path)
 
+    """
+    vis
+    """
+    # full_paths,basenames = get_paths(r"C:\serialPortVisualization\data\0711_8")
+    # for path, name in zip(full_paths, basenames):
+    #     singleDatInfer(path,name,isSavePltImage=True)
 
-    full_paths,basenames = get_paths(r"C:\serialPortVisualization\data\0709_6")
-    for path, name in zip(full_paths, basenames):
-        singleDatInfer(path,name,isSavePltImage=True)
+
+    """
+    logVis
+    """
+    logVis(r"C:\serialPortVisualization\data\0711_8\SAVE2025_7_11_16-54-59.DAT")
     # parsed_data = read_and_split_by_equal(file_path)
     # # keyList=['curExposure','newExposure','curGain','newGain',"avgL"]
     # keyList=['curExposure','curGain',"avgL"]
