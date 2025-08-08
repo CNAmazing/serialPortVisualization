@@ -4,7 +4,6 @@ import numpy as np
 import os
 import re
 from collections import defaultdict
-
 def read_and_split_by_equal(filename):
     """
     读取txt文件并按等号分割每行内容
@@ -92,7 +91,10 @@ def pltMultiImage(dataDict,tital='tital',isSavePltImage=False):
     plt.show()
 def singleDatInfer(file_path, title=None,isSavePltImage=False):
     parsed_data = read_and_split_by_equal(file_path)
-    keyList = ['curExposure', 'newExposure','curGain',"avgL_d",'isEqualPrevExposure']
+    # keyList = ['curGain','curExposure','avgL_d']
+    keyList = ['curExposure','curGain','avgL_d','L','roundedCCT']
+    # keyList = ['roundedCCT','isgainR','isgainG','isgainB',]
+    # keyList = ['roundedCCT','noGainR','noGainG','noGainB',]
     dataDict = generateDict(keyList)
     updateDict(dataDict, parsed_data)
     pltMultiImage(dataDict, tital=title,isSavePltImage=isSavePltImage)
@@ -146,7 +148,8 @@ def logVis(log_file_path):
         'frame_count': r'framecnt = (\d+)',
         # 'luma_target': r'LumaTar=(\d+)',
         # 'current_luma': r'CurLuma=(\d+)'
-        'Converged':r'Converged = (Yes|No)'
+        'Converged':r'Converged = (Yes|No)',
+        'OutFlag': r' out_img_flag = (\d+)',
     }
     
     with open(log_file_path, 'r') as file:
@@ -173,11 +176,18 @@ def logVis(log_file_path):
     
  
     for i, frame in enumerate(frame_data):
+        if not frame.values():
+            continue
         print(f"Frame {i + 1}:")
         for key, value in frame.items():
             if key=="frame_count":
                 continue
             print(f" {key}: {value}")
+
+def fitC(G,EV,t):
+    c=G*t/2**(EV)
+    print(f"c={c}")
+    print(f"c={c/(G*t)}")
 # 使用示例
 if __name__ == "__main__":
     # file_path = r"C:\serialPortVisualization\data\0626\SAVE2025_6_26_9-12-39.DAT"  # 替换为你的文件路径
@@ -186,15 +196,15 @@ if __name__ == "__main__":
     """
     vis
     """
-    # full_paths,basenames = get_paths(r"C:\serialPortVisualization\data\0711_8")
-    # for path, name in zip(full_paths, basenames):
-    #     singleDatInfer(path,name,isSavePltImage=True)
+    full_paths,basenames = get_paths(r"C:\serialPortVisualization\data\0801_1")
+    for path, name in zip(full_paths, basenames):
+        singleDatInfer(path,name,isSavePltImage=True)
 
 
     """
     logVis
     """
-    logVis(r"C:\serialPortVisualization\data\0711_8\SAVE2025_7_11_16-54-59.DAT")
+    # logVis(r"C:\serialPortVisualization\data\0711_8\SAVE2025_7_11_16-54-59.DAT")
     # parsed_data = read_and_split_by_equal(file_path)
     # # keyList=['curExposure','newExposure','curGain','newGain',"avgL"]
     # keyList=['curExposure','curGain',"avgL"]
@@ -203,3 +213,13 @@ if __name__ == "__main__":
     # # errorExposure=np.array(newExposure)-np.array(curExposure)
     # # pltSingleImage(dataDict)
     # pltMultiImage(dataDict)
+
+    """
+    fitC
+    """
+    # data=[[4000,56/8,33173],
+    #       [8800,56/13,33173],
+    #       [1000,56/9,12544]
+    #       ]
+    # for d in data:
+    #     fitC(*d)

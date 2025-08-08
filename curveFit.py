@@ -10,6 +10,11 @@ def func_exp(x, a, k, c):
     return a * np.exp(-k * x )+ c
 def multi_exp(x, a1, k1, a2, k2, c):
     return a1 * np.exp(-k1 * x) + a2 * np.exp(-k2 * x) + c
+def mix_exp_linear(x, a1, k1,a2, k2, b1, b2):
+    return a1 * np.exp(-k1 * x)  + a2 * np.exp(-k2 * x)+ b1 * x + b2
+
+def mix_exp_linear_plus(x, a1, k1,a2, k2, b2):
+    return a1 * np.exp(-k1 * x)  + a2 * np.exp(-k2 * x)+ b2
 # 以2为底的指数衰减函数: a * 2^(-k*x) + c 
 def func_exp2(x, a, k, c):
     return a * 2**(-k * x) + c
@@ -25,6 +30,9 @@ def func_linear(x, a, b):
 # 平方根函数: a*sqrt(x) + b
 def func_sqrt(x, a, b):
     return a * np.sqrt(x) + b
+
+def func_1_x(x, a, b, c):
+    return a / (x + b) + c
 
 
 def curveFit(data,func):
@@ -43,6 +51,8 @@ def curveFit(data,func):
     data = data[sorted_indices]
     x = data[:,0]
     y = data[:,1]
+
+
     params, covariance = curve_fit(func, x, y, p0=p0,maxfev=100000)  # 设置边界条件，避免参数为负值
     param_errors = np.sqrt(np.diag(covariance))
 
@@ -60,8 +70,8 @@ def curveFit(data,func):
     plt.plot(x, y_fit, 'r-', label="拟合曲线")
     plt.legend()
     plt.show()
-    param_str = ", ".join([f"{name}={value:.2f}" for name, value in param_values.items()])
-    paramError_str = ", ".join([f"{name}误差={error:.2f}" for name, error in zip(fit_param_names, param_errors)])
+    param_str = ", ".join([f"{name}={value}" for name, value in param_values.items()])
+    paramError_str = ", ".join([f"{name}误差={error}" for name, error in zip(fit_param_names, param_errors)])
     print(f"拟合参数: {param_str}")
     print(f"拟合误差: {paramError_str}")
     return params
@@ -73,62 +83,20 @@ def regularizeData(X):
 def valueCal(x, *params,func):
 
     y= func(x, *params)
+    
     plt.scatter(x, y, label="拟合数据")
     for x_i, y_i in zip(x,y):
         plt.text(x_i, y_i, f"{x_i,int(y_i)}", ha='center', va='bottom')
      # 打印每个点的坐标  
     plt.plot(x, y, 'r-', )
-    y=regularizeData(y)  # 对x进行正则化处理
     print(f"x: {x.tolist()}")  # 打印每个点的坐标  
+    y=regularizeData(y)  # 对x进行正则化处理
 
     print(f"y: {y.astype(int).tolist()}") 
     plt.legend()
     plt.show()
 
 def main():
-    # data = np.array([
-    #     [1, 32000],
-    #     [1, 26000],
-    #     [3, 15000],
-    #     [5, 8000],
-    #     [6, 7000],
-    #     [7, 5000],
-    #     [7, 5000],
-    #     [8, 5000],
-    #     [8, 5000],
-
-    #     [0, 41000],
-    #     [0, 40000],
-    #     [1, 26000],
-    #     [2, 18000],
-    #     [3, 14000],
-    #     [4, 12000],
-    #     [5, 8000],
-    #     [5, 7000],
-    #     [6, 7000],
-    #     [6, 7000],
-     
-    #     [11, 4000],
-    #     [15, 3000],
-
-    #     [15, 3000],
-    #     [7, 5000],
-    #     [10, 4000],
-    #     [15, 3000],
-    #     [2,10000],
-    #     [5, 8000],
-    #     [5, 8000],
-    #     [7,6000],
-    #     [5, 8000],
-    #     [15,4000],
-    #     [12,4000],
-    #     [10,4000],
-    #     [5, 8000],
-    #     [7,5000],
-    #     [2,14000],
-    #     [2,10000],
-    #     [2,16725],
-    # ])
     data=np.array([
                   [7.4,9700],
                   [11.2,4000],
@@ -155,20 +123,54 @@ def main():
                   [6.9,9000],
                   [14.5,4200],
                   [13,4700],
+                  [56,1000]
                 
               
                   ])
-    params=curveFit(data,func=multi_exp)
+
+    data_outdoor=np.array([
+                [92.3,9200],
+                [73.1,16400],
+                [85.4,10000],
+                [78.7,13600],
+                [56,20000],
+                [85.4,10500],
+                [71.4,16700],
+                [86,9800],
+                [78.5,13800],
+                [130,1000],
+                [94,5000],
+                [80.5,6700],
+                [89,6300],
+                [91.4,6000],
+                [74,11000],
+                [75.3,11500],
+                [80,9500]
+                ])
+
+
+    data_fix=np.array([
+                [3375,2800],
+                [3275,2800],
+                [3800,3800],
+                [3800,3800],
+                [4150,4150],
+                [4150,4150],
+                [5300,6500],
+                [5350,6500],
+                
+    ])
+    params=curveFit(data_fix,func=func_quad)
 
     """"
     计算给定x值的拟合曲线y值
     """
     x=[]
-    for i in range(26):
+    for i in range(2500,6500,500):
         x.append(i)
     x=np.array(x)
     # a, b, c = 36984.00,0.41,3431.71
-    valueCal(x,*params,func=multi_exp)
+    valueCal(x,*params,func=func_quad)
 
 main()
 
