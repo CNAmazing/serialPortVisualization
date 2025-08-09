@@ -870,21 +870,7 @@ def lenShadingCorrection(image_folder):
         print(f"result最小值: {result.min()}, 最大值: {result.max()}")
 
         writePgm(result, basename)
-        # filename = f"{basename}_New.pgm"
-        # with open(filename, "wb") as f:
-        #     # 写入文件头
-        #     f.write(b"P5\n")
-        #     f.write(b"#METADATA BEGIN\n")
-        #     f.write(b"#BIT_PER_SAMPLE,0,10\n")
-        #     f.write(b"#CFA_PATTERN,3,RGGB\n")
-        #     f.write(b"#__data_type__,3,Bayer_R\n")
-        #     f.write(b"#METADATA END\n")
-        #     f.write(f"{result.shape[1]} {result.shape[0]}\n".encode())  # 宽度 高度
-        #     f.write(b"1023\n")  # 关键：声明 maxval=1023
-        #     # 写入像素数据（16 位小端序）
-        #     f.write(result.astype(">u2").tobytes())  # "<u2" 表示小端序 uint16 ">u2" 表示小端序 uint16
-        # cv2.imwrite(f'{basename}_New.pgm', result)
-
+        
 def lenShadingCorrectionFor_Png(image_folder):
     full_paths, basenames = get_paths(image_folder,suffix=".png")
     for path,basename in zip(full_paths,basenames):
