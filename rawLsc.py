@@ -871,7 +871,7 @@ def lenShadingCorrection(image_folder):
 
         writePgm(result, basename)
         
-def lenShadingCorrectionFor_Png(image_folder):
+def lenShadingCorrectionFor_Png(image_folder,yaml_file=None):
     full_paths, basenames = get_paths(image_folder,suffix=".png")
     for path,basename in zip(full_paths,basenames):
         print(f"Processing image: {path}...")
@@ -882,7 +882,7 @@ def lenShadingCorrectionFor_Png(image_folder):
             print("无法加载图像，请检查文件路径")
         
         key= getCTstr(path)
-        yaml_file = fr'C:\serialPortVisualization\data\0807LSC_Calib\current_isp_config{key}.yaml'
+        yaml_file = fr'C:\serialPortVisualization\data\0812_1_Calib\current_isp_config{key}.yaml'
         dataYaml = loadYaml(yaml_file)
         gainList=[]
         for key,value in dataYaml.items():
@@ -912,11 +912,11 @@ def main():
     
 
     """=====================================pngLSC====================================="""
-    # folder_path=r'F:\0807ccmLSC'
-    # lenShadingCorrectionFor_Png(folder_path)
+    folder_path=r'C:\serialPortVisualization\data\0812_1'
+    lenShadingCorrectionFor_Png(folder_path)
 
     ''''=====================png标定========================'''
-    # folder_path=r'C:\serialPortVisualization\data\0807LSC'
+    # folder_path=r'C:\serialPortVisualization\data\0812_1_Calib'
     # lenShadingCalibrationFor_Png(folder_path)
     '''=====================pgm转raw========================'''
     
