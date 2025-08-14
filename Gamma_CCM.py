@@ -94,11 +94,11 @@ def ccmApply(img,ccm):
 def main():
 
     # Gamma(r"C:\serialPortVisualization\corrected_image.jpg")
-    folderPath = r"C:\serialPortVisualization\data\0812_6"
+    folderPath = r"C:\serialPortVisualization\data\0814_1_rgb2"
     yamlFile='ccmDict.yaml'
 
 
-    full_paths, basenames= get_paths(folderPath, suffix=".png")
+    full_paths, basenames= get_paths(folderPath, suffix=".jpg")
     yamlData= loadYaml(yamlFile)
 
     for path, basename in zip(full_paths, basenames):
@@ -110,11 +110,14 @@ def main():
         print(CCM)
         img= cv2.imread(path)
         img_CCM= ccmApply(img,CCM)
+        img_CCM = np.clip(img_CCM, 0, 1)
+
         img_Gamma= Gamma(img_CCM)   
-        img_Gamma = np.clip(img_Gamma, 0, 1)
 
         img_Gamma = (img_Gamma * 255).astype(np.uint8)
-        imgName= basename+'_CCM.png'
+        img_Gamma = np.clip(img_Gamma, 0, 255)
+
+        imgName= basename+'_CCM.jpg'
         cv2.imwrite(imgName, cv2.cvtColor(img_Gamma, cv2.COLOR_RGB2BGR))
 
 main()

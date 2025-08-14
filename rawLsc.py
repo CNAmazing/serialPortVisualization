@@ -609,6 +609,24 @@ def adjust_raw_by_blocks_vectorized(image, gainList):
     # 应用增益
     result = np.clip(image * gain_map, 0, 1023).astype(np.uint16)
     return result
+def apply_rb_white_balance(image, red_gain, blue_gain):
+    """
+    应用红蓝通道白平衡矫正
+    :param image: 输入的RAW图像 (Bayer模式)
+    :param red_gain: 红色通道增益系数
+    :param blue_gain: 蓝色通道增益系数
+    :return: 白平衡矫正后的图像
+    """
+    # 创建输出图像
+    balanced = image.copy()
+    
+    # 矫正红色通道 (R位于偶数行偶数列)
+    balanced[::2, ::2] = np.clip(image[::2, ::2] * red_gain, 0, 1023).astype(np.uint16)
+    
+    # 矫正蓝色通道 (B位于奇数行奇数列)
+    balanced[1::2, 1::2] = np.clip(image[1::2, 1::2] * blue_gain, 0, 1023).astype(np.uint16)
+    
+    return balanced
 def adjust_rgb_by_blocks_optimized(image: np.ndarray, gainList) -> np.ndarray:
     # Split RGB channels
     b, g, r = cv2.split(image.astype('float32'))
@@ -755,16 +773,35 @@ def adjust_raw_by_blocks(image,gainList):
             image[y_pos, x_pos] = np.clip(image[y_pos, x_pos] * gain, 0, 1023)
     
     return image
+def printCornerValues_RGGB(array):
+    channelType= ['R','Gr','Gb','B']
+    h,w= array[0].shape
+    strTmp=""
+    for arr,type_ in zip(array,channelType): 
+        leftTop= arr[0, 0]
+        rightTop= arr[0, w-1]
+        leftBottom= arr[h-1, 0]
+        rightBottom= arr[h-1, w-1]
+        strTmp+=type_+":["+ f"{leftTop:.2f}, {rightTop:.2f}, {leftBottom:.2f}, {rightBottom:.2f}" +"]"
+    print(f" {strTmp}")
 def lenShadingCalibration(image_folder):
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
     for path,basename in zip(full_paths,basenames):
         pgm_image = read_pgm_with_opencv(path)
+
         if pgm_image is not None:
-            print(f"图像尺寸: {pgm_image.shape}")  # (高度, 宽度)
-            print(f"数据类型: {pgm_image.dtype}")
-            print(f"最小值: {pgm_image.min()}, 最大值: {pgm_image.max()}")
-            result = lsc_calib(pgm_image, mesh_h_nums=12, mesh_w_nums=16, sample_size=13,maxFactor=1.0)
+            print(f"图像尺寸: {pgm_image.shape},数据类型: {pgm_image.dtype},最小值: {pgm_image.min()}, 最大值: {pgm_image.max()}")  # (高度, 宽度)
+            resultList=[]
+            for s in range(7,15,2):
+                resultTmp = lsc_calib(pgm_image, mesh_h_nums=12, mesh_w_nums=16, sample_size=s,maxFactor=1.0)
+                print('当前采样点数:',s)
+                printCornerValues_RGGB(resultTmp)
+                resultList.append(resultTmp)
+            stacked = np.stack(resultList)  
+            result = np.mean(stacked, axis=0)
             visualize_2d_array_multi(result,basename)
+            saveYaml_RGGB(result, basename)
+
 def printCornerValues(array):
     channelType= ['B','G','R']
     h,w= array[0].shape
@@ -824,11 +861,16 @@ def writePgm(image, basename):
         # 写入像素数据（16 位小端序）
         f.write(image.astype(">u2").tobytes())  # "<u2" 表示小端序 uint16 ">u2" 表示小端序 uint16
 
+def RGGB2RGB(bayer_pgm):
+    # 常见选项：COLOR_BAYER_BG2RGB, COLOR_BAYER_RG2RGB, COLOR_BAYER_GB2RGB 等
+    rgb = cv2.cvtColor(bayer_pgm, cv2.COLOR_BAYER_RGGB2RGB)
+    return rgb
+
 def lenShadingCorrection(image_folder):
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
     for path,basename in zip(full_paths,basenames):
-        key= getCTstr(path)
-        yaml_file = fr'C:\serialPortVisualization\data\0806LSC_yaml\isp_sensor_raw{key}.yaml'
+        keyCT= getCTstr(path)
+        yaml_file = fr'C:\serialPortVisualization\data\0814_1_LSC\isp_sensor_raw{keyCT}.yaml'
         dataYaml = loadYaml(yaml_file)
         gainList=[]
         for key,value in dataYaml.items():
@@ -860,16 +902,19 @@ def lenShadingCorrection(image_folder):
         =============================opencv=============================
         """
         pgm_image = read_pgm_with_opencv(path)
-
-        print(f"图像尺寸: {pgm_image.shape}")  # (高度, 宽度)
-        print(f"数据类型: {pgm_image.dtype}")
+        awbList={'H':(1.763,0.831),'U30':(1.815,1.038),'CWF':(1.588,1.251),'D50':(1.304,1.400)}
+        rGain,bGain=awbList[keyCT]
         print(f"最小值: {pgm_image.min()}, 最大值: {pgm_image.max()}")
         result=adjust_raw_by_blocks_vectorized(pgm_image,gainList)
-        print(f"result图像尺寸: {result.shape}")  # (高度, 宽度)
-        print(f"result数据类型: {result.dtype}")
         print(f"result最小值: {result.min()}, 最大值: {result.max()}")
+        rgb_white= apply_rb_white_balance(result, rGain, bGain)  # 假设红蓝通道增益为1.0
+        print(f"rgb最小值: {rgb_white.min()}, 最大值: {rgb_white.max()}")
+        rgb=RGGB2RGB(rgb_white)
 
-        writePgm(result, basename)
+        raw_8bit = ((rgb - rgb.min()) / (rgb.max() - rgb.min())) * 255
+        raw_8bit = raw_8bit.astype(np.uint8)
+        cv2.imwrite(f'{basename}_rgb.jpg', raw_8bit)
+        # writePgm(result, basename)  
         
 def lenShadingCorrectionFor_Png(image_folder,yaml_file=None):
     full_paths, basenames = get_paths(image_folder,suffix=".png")
@@ -898,27 +943,110 @@ def lenShadingCorrectionFor_Png(image_folder,yaml_file=None):
                         
         result=adjust_rgb_by_blocks_optimized(img,gainList)
         cv2.imwrite(f'{basename}_AfterCalib.png', result, [cv2.IMWRITE_PNG_COMPRESSION, 9])
-
-
+def readRgm2AWB(imagePath,roi=None):
+    pgmImage=read_pgm_with_opencv(imagePath)
+    
+    if pgmImage is None:
+        raise ValueError("无法读取图像文件: " + imagePath)
+    
+   
+    height, width = pgmImage.shape
+    
+    # 设置ROI区域
+    if roi is None:
+        x1, y1, x2, y2 = 0, 0, width, height
+    else:
+        x1, y1, x2, y2 = roi
+        # 确保ROI在图像范围内并转换为有效坐标
+        x1 = max(0, min(x1, width-1))
+        y1 = max(0, min(y1, height-1))
+        x2 = max(0, min(x2, width))
+        y2 = max(0, min(y2, height))
+        # 确保x2 > x1且y2 > y1
+        if x2 <= x1:
+            x2 = x1 + 1
+        if y2 <= y1:
+            y2 = y1 + 1
+    
+    # 初始化统计变量为64位无符号整数
+    r_sum = np.uint64(0)
+    g1_sum = np.uint64(0)  # R行G列
+    g2_sum = np.uint64(0)  # G行B列
+    b_sum = np.uint64(0)
+    r_count = np.uint64(0)
+    g1_count = np.uint64(0)
+    g2_count = np.uint64(0)
+    b_count = np.uint64(0)
+    
+    # 遍历ROI区域内的像素
+    for row in range(y1, y2):
+        for col in range(x1, x2):
+            pixel = np.uint64(pgmImage[row, col])  # 转换为64位无符号整数
+            if row % 2 == 0:  # 偶数行
+                if col % 2 == 0:  # 偶数列 - R
+                    r_sum += pixel
+                    r_count += 1
+                else:  # 奇数列 - G
+                    g1_sum += pixel
+                    g1_count += 1
+            else:  # 奇数行
+                if col % 2 == 0:  # 偶数列 - G
+                    g2_sum += pixel
+                    g2_count += 1
+                else:  # 奇数列 - B
+                    b_sum += pixel
+                    b_count += 1
+    
+    # 计算均值（转换为浮点数避免整数除法）
+    r_mean = float(r_sum) / max(float(r_count), 1.0)
+    g1_mean = float(g1_sum) / max(float(g1_count), 1.0)
+    g2_mean = float(g2_sum) / max(float(g2_count), 1.0)
+    b_mean = float(b_sum) / max(float(b_count), 1.0)
+    
+    # 合并两个G通道的均值
+    g_mean = (g1_mean + g2_mean) / 2.0 if (g1_count + g2_count) > 0 else 0.0
+    print(f"R_mean: {r_mean:2f}, G_mean: {g_mean:2f}, B_mean: {b_mean:2f}, G1_mean: {g1_mean:2f}, G2_mean: {g2_mean:2f}")
+    print(f"rGain={(g_mean/r_mean):3f}, bGain={(g_mean/b_mean):3f}")
+    # return {
+    #     'R_mean': r_mean,
+    #     'G_mean': g_mean,
+    #     'B_mean': b_mean,
+    #     'G1_mean': g1_mean,
+    #     'G2_mean': g2_mean
+    
+    # }
+def folderPocessingAWB(image_folder):
+    roi=(1170,1370,1250,1520)
+    full_paths, basenames = get_paths(image_folder,suffix=".pgm")
+    for path,basename in zip(full_paths,basenames):
+        print(f"Processing image: {path}...")
+        ct=getCTstr(basename)
+        print('========================',ct,'===================')
+        readRgm2AWB(path,roi)
+    
 def main():
 
     """"=============================标定代码============================="""
-    # folder_path= r'C:\serialPortVisualization\new'
+    # folder_path= r'C:\serialPortVisualization\data\0814_1_LSC'
     # lenShadingCalibration(folder_path)
     """"=============================应用代码============================="""
-    # folder_path=r'C:\serialPortVisualization\0805Test'
+    # folder_path=r'C:\serialPortVisualization\data\0814_1_colorChecker'
     # lenShadingCorrection(folder_path)
 
     
 
     """=====================================pngLSC====================================="""
-    folder_path=r'C:\serialPortVisualization\data\0812_1'
-    lenShadingCorrectionFor_Png(folder_path)
+    # folder_path=r'C:\serialPortVisualization\data\0812_1'
+    # lenShadingCorrectionFor_Png(folder_path)
 
     ''''=====================png标定========================'''
     # folder_path=r'C:\serialPortVisualization\data\0812_1_Calib'
     # lenShadingCalibrationFor_Png(folder_path)
     '''=====================pgm转raw========================'''
+
+    """===============AWB标定=================="""
+    folder_path=r'C:\serialPortVisualization\data\0814_1_colorChecker_afterLSC'
+    folderPocessingAWB(folder_path)
     
 
 

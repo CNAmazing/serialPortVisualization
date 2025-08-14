@@ -178,7 +178,7 @@ def draw_metadata_on_image(image, meta):
     return image
 
 if __name__ == "__main__":
-    folder = r"C:\serialPortVisualization\data\0808_4"
+    folder = r"C:\serialPortVisualization\data\0813_5"
     dng_files = glob(os.path.join(folder, "*.dng"))
 
     for dng_path in dng_files:

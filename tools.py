@@ -24,14 +24,38 @@ def print_file_tree(directory, indent=''):
     for f in files:
         print(f"{indent}    📄 {f}")
 
-if __name__ == "__main__":
-    import sys
+def get_paths(folder_name, suffix=".csv"):
+    """
+    递归获取指定文件夹及其子目录中的所有suffix图片路径及不带后缀的文件名
     
-    if len(sys.argv) != 2:
-        print("使用方法: python file_tree.py <目录路径>")
-        sys.exit(1)
+    参数:
+        folder_name (str): 目标文件夹名称（如"x"）
+        suffix (str): 文件后缀，默认".jpg"
+        
+    返回:
+        tuple: (完整路径列表, 不带后缀的文件名列表)，如(
+                ["x/images/pic1.jpg", "x/subdir/pic2.jpg"], 
+                ["pic1", "pic2"]
+               )
+    """
+    full_paths = []
+    basenames = []
     
-    target_dir = sys.argv[1]
-    print(f"文件树: {target_dir}")
-    print("-" * 50)
-    print_file_tree(target_dir)
+    try:
+        if not os.path.exists(folder_name):
+            raise FileNotFoundError(f"目录不存在: {folder_name}")
+            
+        # 使用 os.walk 递归遍历所有子目录
+        for root, dirs, files in os.walk(folder_name):
+            for f in files:
+                if f.lower().endswith(suffix):
+                    file_path = os.path.join(root, f)
+                    if os.path.isfile(file_path):
+                        full_paths.append(file_path)
+                        basenames.append(os.path.splitext(f)[0])
+                        
+        return full_paths, basenames
+        
+    except Exception as e:
+        print(f"错误: {e}")
+        return [], []
