@@ -7,6 +7,7 @@ import os
 import json
 import yaml
 from PIL import Image
+from tools import *
 plt.rcParams['font.sans-serif'] = ['SimSun']  # 指定宋体
 plt.rcParams['axes.unicode_minus'] = False    # 解决负号显示问题
 def get_bayer_color(x, y):
@@ -218,20 +219,6 @@ def lsc_calib(image, mesh_h_nums=24, mesh_w_nums=32, sample_size=3,maxFactor=1.0
     return [mesh_R, mesh_Gr, mesh_Gb, mesh_B]
 
 
-def analyze_image(image):
-    max_val = np.max(image)  # 最大值
-    min_val = np.min(image)  # 最小值
-
-    print("最大值:", max_val)  # 9
-    print("最小值:", min_val)  # 1
-                    
-    # 获取最大值的坐标（可能有多个）
-    max_positions = np.where(image == max_val)
-    print("最大值坐标:", list(zip(max_positions[0], max_positions[1])))  # [(0, 2)]
-
-    # 获取最小值的坐标（可能有多个）
-    min_positions = np.where(image == min_val)
-    print("最小值坐标:", list(zip(min_positions[0], min_positions[1])))  # [(1, 2)]
 def visualize_2d_array_multi(data_list, name):
     """
     可视化多个二维数组，以2×2子图形式显示
@@ -366,40 +353,7 @@ def visualize_2d_array(data,name='output'):
     )
     # 显示图形
     # plt.show()
-def get_paths(folder_name,suffix=".jpg"):
-    """
-    获取指定文件夹下images子目录中的所有suffix图片路径及不带后缀的文件名
-    
-    参数:
-        folder_name (str): 目标文件夹名称（如"x"）
-        
-    返回:
-        tuple: (完整路径列表, 不带后缀的文件名列表)，如(
-                ["x/images/pic1.jpg", "x/images/pic2.jpg"], 
-                ["pic1", "pic2"]
-               )
-    """
-    full_paths = []
-    basenames = []
-    
-    try:
-        images_dir = folder_name
-        if not os.path.exists(images_dir):
-            raise FileNotFoundError(f"目录不存在: {images_dir}")
-            
-        for f in os.listdir(images_dir):
-            if f.lower().endswith(suffix):
-                file_path = os.path.join(images_dir, f)
-                if os.path.isfile(file_path):
-                    full_paths.append(file_path)
-                    # 去掉.jpg后缀获取纯文件名
-                    basenames.append(os.path.splitext(f)[0])
-                    
-        return full_paths, basenames
-        
-    except Exception as e:
-        print(f"错误: {e}")
-        return [], []
+
 def saveYaml_RGGB(result, basename):
     """
     保存校准结果到 YAML 文件
@@ -485,10 +439,7 @@ def saveYaml_RGB(result, basename):
         yaml.dump(calibration_data, f, default_flow_style=None, sort_keys=False,width=float("inf"))
     
     print(f"Calibration results saved to {basename}.yaml")
-def loadYaml(file_path):
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data = yaml.safe_load(f)
-    return data
+
 def adjust_raw_by_blocks_vectorized_pillow(image, gainList):
     """
     向量化版本，显著提高速度
@@ -549,7 +500,7 @@ def adjust_raw_by_blocks_vectorized_pillow(image, gainList):
     # 应用增益
     result = np.clip(image * gain_map, 0, 65535)
     return result
-def adjust_raw_by_blocks_vectorized(image, gainList):
+def LSC(image, gainList):
     """
     向量化版本，显著提高速度
     """
@@ -609,7 +560,7 @@ def adjust_raw_by_blocks_vectorized(image, gainList):
     # 应用增益
     result = np.clip(image * gain_map, 0, 1023).astype(np.uint16)
     return result
-def apply_rb_white_balance(image, red_gain, blue_gain):
+def AWB(image, red_gain, blue_gain):
     """
     应用红蓝通道白平衡矫正
     :param image: 输入的RAW图像 (Bayer模式)
@@ -836,16 +787,7 @@ def lenShadingCalibrationFor_Png(image_folder):
             result = np.mean(stacked, axis=0)
             visualize_2d_array_multi_png(result,basename)
             saveYaml_RGB(result, basename)
-def getCTstr(file_path):
-    file_path=str(file_path)
-    if 'U30' in file_path:
-        return 'U30'
-    elif 'CWF' in file_path:
-        return 'CWF'
-    elif 'D50' in file_path:
-        return 'D50'
-    elif 'H' in file_path:
-        return 'H'
+
 def writePgm(image, basename):
     filename = f"{basename}_NewCalib.pgm"
     with open(filename, "wb") as f:
@@ -861,7 +803,7 @@ def writePgm(image, basename):
         # 写入像素数据（16 位小端序）
         f.write(image.astype(">u2").tobytes())  # "<u2" 表示小端序 uint16 ">u2" 表示小端序 uint16
 
-def RGGB2RGB(bayer_pgm):
+def Demosaic(bayer_pgm):
     # 常见选项：COLOR_BAYER_BG2RGB, COLOR_BAYER_RG2RGB, COLOR_BAYER_GB2RGB 等
     rgb = cv2.cvtColor(bayer_pgm, cv2.COLOR_BAYER_RGGB2RGB)
     return rgb
@@ -869,8 +811,9 @@ def RGGB2RGB(bayer_pgm):
 def lenShadingCorrection(image_folder):
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
     for path,basename in zip(full_paths,basenames):
+        print(f"Processing image: {path}...")   
         keyCT= getCTstr(path)
-        yaml_file = fr'C:\serialPortVisualization\data\0814_1_LSC\isp_sensor_raw{keyCT}.yaml'
+        yaml_file = fr'C:\serialPortVisualization\data\0815_1_Config\isp_sensor_raw{keyCT}.yaml'
         dataYaml = loadYaml(yaml_file)
         gainList=[]
         for key,value in dataYaml.items():
@@ -902,19 +845,17 @@ def lenShadingCorrection(image_folder):
         =============================opencv=============================
         """
         pgm_image = read_pgm_with_opencv(path)
-        awbList={'H':(1.763,0.831),'U30':(1.815,1.038),'CWF':(1.588,1.251),'D50':(1.304,1.400)}
+        awbList={'H':(1.793,0.825),'A':(1.750,0.923),'U30':(1.897,1.031),'CWF':(1.619,1.280),'D50':(1.393,1.312),'D60':(1.311,1.385)}
+        # awbList={'H':(1.818,0.863),'U30':(1.897,1.031),'CWF':(1.619,1.280),'D50':(1.406,1.321)}
         rGain,bGain=awbList[keyCT]
-        print(f"最小值: {pgm_image.min()}, 最大值: {pgm_image.max()}")
-        result=adjust_raw_by_blocks_vectorized(pgm_image,gainList)
-        print(f"result最小值: {result.min()}, 最大值: {result.max()}")
-        rgb_white= apply_rb_white_balance(result, rGain, bGain)  # 假设红蓝通道增益为1.0
-        print(f"rgb最小值: {rgb_white.min()}, 最大值: {rgb_white.max()}")
-        rgb=RGGB2RGB(rgb_white)
+        result=LSC(pgm_image,gainList)
+        rgb_white= AWB(result, rGain, bGain)  # 假设红蓝通道增益为1.0
+        rgb=Demosaic(rgb_white)
 
-        raw_8bit = ((rgb - rgb.min()) / (rgb.max() - rgb.min())) * 255
+        raw_8bit = rgb/1023 * 255  # 将16位数据转换为8位
         raw_8bit = raw_8bit.astype(np.uint8)
         cv2.imwrite(f'{basename}_rgb.jpg', raw_8bit)
-        # writePgm(result, basename)  
+        writePgm(result, basename)  
         
 def lenShadingCorrectionFor_Png(image_folder,yaml_file=None):
     full_paths, basenames = get_paths(image_folder,suffix=".png")
@@ -927,7 +868,7 @@ def lenShadingCorrectionFor_Png(image_folder,yaml_file=None):
             print("无法加载图像，请检查文件路径")
         
         key= getCTstr(path)
-        yaml_file = fr'C:\serialPortVisualization\data\0812_1_Calib\current_isp_config{key}.yaml'
+        yaml_file = fr'C:\serialPortVisualization\data\0815_1_A_LSC\isp_sensor_raw{key}.yaml'
         dataYaml = loadYaml(yaml_file)
         gainList=[]
         for key,value in dataYaml.items():
@@ -1005,8 +946,11 @@ def readRgm2AWB(imagePath,roi=None):
     
     # 合并两个G通道的均值
     g_mean = (g1_mean + g2_mean) / 2.0 if (g1_count + g2_count) > 0 else 0.0
-    print(f"R_mean: {r_mean:2f}, G_mean: {g_mean:2f}, B_mean: {b_mean:2f}, G1_mean: {g1_mean:2f}, G2_mean: {g2_mean:2f}")
-    print(f"rGain={(g_mean/r_mean):3f}, bGain={(g_mean/b_mean):3f}")
+    rGain= g_mean / r_mean if r_mean > 0 else 0.0
+    bGain= g_mean / b_mean if b_mean > 0 else 0.0
+    # print(f"R_mean: {r_mean:2f}, G_mean: {g_mean:2f}, B_mean: {b_mean:2f}, G1_mean: {g1_mean:2f}, G2_mean: {g2_mean:2f}")
+    # print(f"rGain={rGain:3f}, bGain={bGain:3f}")
+    return rGain,bGain
     # return {
     #     'R_mean': r_mean,
     #     'G_mean': g_mean,
@@ -1016,22 +960,30 @@ def readRgm2AWB(imagePath,roi=None):
     
     # }
 def folderPocessingAWB(image_folder):
-    roi=(1170,1370,1250,1520)
+    rois=[(962,1440,1200,1672)]
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
     for path,basename in zip(full_paths,basenames):
         print(f"Processing image: {path}...")
         ct=getCTstr(basename)
         print('========================',ct,'===================')
-        readRgm2AWB(path,roi)
-    
+        rbGain=[]
+        for roi in rois:
+            print(f"Processing ROI: {roi}")
+            rGain,bGain=readRgm2AWB(path,roi)
+            rbGain.append((rGain,bGain))
+            print(f"ROI {roi} - R Gain: {rGain:.3f}, B Gain: {bGain:.3f}")
+        # 计算平均增益
+        rbGain = np.mean(rbGain, axis=0)
+
+        print(f"Average R Gain: {rbGain[0]:.3f}, Average B Gain: {rbGain[1]:.3f}")
 def main():
 
     """"=============================标定代码============================="""
-    # folder_path= r'C:\serialPortVisualization\data\0814_1_LSC'
+    # folder_path= r'C:\serialPortVisualization\data\0815_2_LSC'
     # lenShadingCalibration(folder_path)
     """"=============================应用代码============================="""
-    # folder_path=r'C:\serialPortVisualization\data\0814_1_colorChecker'
-    # lenShadingCorrection(folder_path)
+    folder_path=r'C:\serialPortVisualization\data\0815_2' 
+    lenShadingCorrection(folder_path)
 
     
 
@@ -1045,8 +997,8 @@ def main():
     '''=====================pgm转raw========================'''
 
     """===============AWB标定=================="""
-    folder_path=r'C:\serialPortVisualization\data\0814_1_colorChecker_afterLSC'
-    folderPocessingAWB(folder_path)
+    # folder_path=r'C:\serialPortVisualization\data\0815_2_AfterWhite'
+    # folderPocessingAWB(folder_path)
     
 
 

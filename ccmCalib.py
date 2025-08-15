@@ -3,6 +3,13 @@ from scipy.optimize import minimize
 import cv2
 import os
 import yaml
+from tools import *
+def reverseGamma(img):
+    mask = img <= 0.04045
+    linear = np.zeros_like(img)
+    linear[mask] = img[mask] / 12.92
+    linear[~mask] = ((img[~mask] + 0.055) / 1.055) ** 2.4
+    return linear
 IDEAL_RGB = np.array([
       [0.447	,0.317	,0.265],
       [0.764	,0.58	,0.501],
@@ -30,9 +37,9 @@ IDEAL_RGB = np.array([
       [0.191	,0.194	,0.199],
     ])  
 # IDEAL_LINEAR_RGB = IDEAL_RGB * 255.0  # 逆Gamma处理后的理想RGB值
-IDEAL_LINEAR_RGB = np.power(IDEAL_RGB, 2.2) * 255.0  # 逆Gamma处理后的理想RGB值
-def npToString(arr):
-    return np.array2string(arr, suppress_small=True, precision=4, floatmode='fixed')
+IDEAL_LINEAR_RGB = np.power(IDEAL_RGB,1/2.2) # 逆Gamma处理后的理想RGB值
+IDEAL_LINEAR_RGB = reverseGamma(IDEAL_RGB) # 逆Gamma处理后的理想RGB值
+
 def readCSV(file_path):
     import csv
     with open(file_path, 'r', encoding='utf-8') as file:
@@ -44,12 +51,12 @@ def readCSV(file_path):
         startRow= 52
         for i in range(24):
             rowIdx= startRow + i
-            R = float(rows[rowIdx][1])*255.0
-            G = float(rows[rowIdx][2])*255.0
-            B = float(rows[rowIdx][3])*255.0
+            R = float(rows[rowIdx][1])
+            G = float(rows[rowIdx][2])
+            B = float(rows[rowIdx][3])
             colorArr.append([float(R), float(G), float(B)])
         print(colorArr)
-        return np.array(colorArr, dtype=np.float32)
+        return np.array(colorArr, dtype=np.float64)
 def RGB2Lab(rgb):
     """将RGB颜色转换为Lab颜色空间"""
     # 这里可以使用OpenCV或其他库进行转换
@@ -76,44 +83,65 @@ class CCM_3x3:
         output=output.T
         ccm = x.reshape(3, 3)  # 将扁平化的参数恢复为3x3矩阵
         predicted = np.dot(ccm,input )  # 应用颜色校正
-        # print(f"===predicted===\n{npToString(predicted)}")
-        # predicted_Lab = RGB2Lab(predicted)    #N*3
-        # print(f"===predicted_Lab===\n{npToString(predicted_Lab)}")
-        # output_Lab = RGB2Lab(output)            #N*3
+     
         sumTmp=np.sqrt(np.sum((predicted - output)**2,axis=0))
-        # print(f"===sumTmp===\n{npToString(sumTmp)}")
+        # sumTmp[20]*=3
+        # sumTmp[23]*=3
         error = np.mean(sumTmp)  # MSE误差
         # print(f"error:{error}")
+        # return (predicted - output).flatten()
         return error
 
     def infer_image(self):
         x = self.ccm.flatten()  # 初始猜测值
+
+
         C = np.zeros((3, 9))
         for i in range(3):
             C[i, 3*i : 3*i+3] = 1  # 每行对应矩阵M的一行的3个元素
         
+        # Cin=np.zeros((1, 9))
+        # Cin[0, 4]=-1
+        # Cin[0, 8]=1
+
+        constraints = []
         # 约束条件: CCM矩阵的每一行之和为1
-        constraints = {
+        constraints.append( {
             'type': 'eq', 
             'fun': lambda x: C @ x - np.ones(3),
-        } if len(C) > 0 else None
-        bounds = [(-10, 10) for _ in range(9)]
+        } )
+        
+
+        # constraints.append( {
+        #     'type': 'ineq', 
+        #     'fun': lambda x: Cin @ x,
+        # } )
+        '''=====================最小二乘============================='''
+        # from scipy.optimize import least_squares
+
+        # 假设你的 self.loss 函数返回残差（residuals）而不是标量损失值
+        # result = least_squares(
+        #     self.loss,  # 这个函数现在应该返回残差向量而不是标量
+        #     x,
+        #     args=(self.input, self.output),
+        #     # bounds=bounds,  # least_squares 支持 bounds
+        #     method='trf',  # 或 'lm'（Levenberg-Marquardt，无约束时使用）
+        #     max_nfev=100000,
+        #     verbose=2
+        # )
+        '''=====================能量项优化============================='''
+        # bounds = [(-4, 4) for _ in range(9)]
         result = minimize(
             self.loss,  # 包装loss函数
             x,  
             args=(self.input, self.output),
             constraints=constraints,
-            bounds=bounds,
+            # bounds=bounds,
             method='trust-constr',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
             options={'maxiter': 100000,'disp': True}
         )
         # 打印优化结果的详细信息
-        print("\n=== Optimization Result ===")
-        print(f"Success: {result.success}")  # 是否成功收敛
-        print(f"Message: {result.message}")  # 状态描述
-        print(f"Final loss value: {result.fun}")  # 最终损失值
-        print(f"Iterations: {result.nit}")  # 迭代次数
-        print(f"Function evaluations: {result.nfev}")  # 损失函数调用次数
+  
 
         # 将优化结果恢复为CCM矩阵
         optimized_ccm = result.x.reshape(3, 3)
@@ -125,7 +153,9 @@ class CCM_3x3:
 
 def ccmInfer(csv_path):
     input_arr=readCSV(csv_path)
-    ccmCalib= CCM_3x3(input_arr, IDEAL_LINEAR_RGB)
+    # input_arr = input_arr/input_arr[18]
+    # input_arr = input_arr*255
+    ccmCalib= CCM_3x3(input_arr, IDEAL_RGB)
     ccm= ccmCalib.infer_image()
     return ccm
 
@@ -164,16 +194,7 @@ def get_paths(folder_name, suffix=".csv"):
     except Exception as e:
         print(f"错误: {e}")
         return [], []
-def getCTstr(file_path):
-    file_path=str(file_path)
-    if 'U30' in file_path:
-        return 'U30'
-    elif 'CWF' in file_path:
-        return 'CWF'
-    elif 'D50' in file_path:
-        return 'D50'
-    elif 'H' in file_path:
-        return 'H'
+
 def convert_numpy(obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
@@ -206,7 +227,7 @@ def folder_to_csv(folder_path):
     
 def main():
         
-    folder_path= r'C:\serialPortVisualization\data\0812_4'
+    folder_path= r'C:\serialPortVisualization\data\0815_1_ColorChecker_Total_'
     folder_to_csv(folder_path)
 
    

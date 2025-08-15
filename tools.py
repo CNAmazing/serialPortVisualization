@@ -1,6 +1,11 @@
 import os
 from pathlib import Path
-
+import yaml
+import numpy as np
+def loadYaml(file_path):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        data = yaml.safe_load(f)
+    return data
 def print_file_tree(directory, indent=''):
     """递归打印目录的文件树结构"""
     path = Path(directory)
@@ -23,7 +28,20 @@ def print_file_tree(directory, indent=''):
     # 打印文件
     for f in files:
         print(f"{indent}    📄 {f}")
-
+def getCTstr(file_path):
+    file_path=str(file_path)
+    if 'U30' in file_path:
+        return 'U30'
+    elif 'CWF' in file_path:
+        return 'CWF'
+    elif 'D50' in file_path:
+        return 'D50'
+    elif 'H' in file_path:
+        return 'H'
+    elif 'A' in file_path:
+        return 'A'
+    elif 'D60' in file_path:
+        return 'D60'
 def get_paths(folder_name, suffix=".csv"):
     """
     递归获取指定文件夹及其子目录中的所有suffix图片路径及不带后缀的文件名
@@ -59,3 +77,5 @@ def get_paths(folder_name, suffix=".csv"):
     except Exception as e:
         print(f"错误: {e}")
         return [], []
+def npToString(arr):
+    return np.array2string(arr, suppress_small=True, precision=4, floatmode='fixed')

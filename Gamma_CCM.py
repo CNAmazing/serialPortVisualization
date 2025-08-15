@@ -2,83 +2,27 @@ import cv2
 import numpy as np
 import yaml
 import os
-def loadYaml(file_path):
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data = yaml.safe_load(f)
-    return data
-def get_paths(folder_name, suffix=".csv"):
-    """
-    递归获取指定文件夹及其子目录中的所有suffix图片路径及不带后缀的文件名
-    
-    参数:
-        folder_name (str): 目标文件夹名称（如"x"）
-        suffix (str): 文件后缀，默认".jpg"
-        
-    返回:
-        tuple: (完整路径列表, 不带后缀的文件名列表)，如(
-                ["x/images/pic1.jpg", "x/subdir/pic2.jpg"], 
-                ["pic1", "pic2"]
-               )
-    """
-    full_paths = []
-    basenames = []
-    
-    try:
-        if not os.path.exists(folder_name):
-            raise FileNotFoundError(f"目录不存在: {folder_name}")
-            
-        # 使用 os.walk 递归遍历所有子目录
-        for root, dirs, files in os.walk(folder_name):
-            for f in files:
-                if f.lower().endswith(suffix):
-                    file_path = os.path.join(root, f)
-                    if os.path.isfile(file_path):
-                        full_paths.append(file_path)
-                        basenames.append(os.path.splitext(f)[0])
-                        
-        return full_paths, basenames
-        
-    except Exception as e:
-        print(f"错误: {e}")
-        return [], []
-# 读取图片
-def test():
-    typeDict=["D50", "CWF", "H", "U30"]
-    for t in typeDict:
-            
-        img_encoded = cv2.imread(fr"C:\serialPortVisualization\current_isp_config{t}_AfterCalib.png")
-
-        # 反 Gamma 处理
-        gamma = 2.4
-        img_gamma = np.power(img_encoded.astype(np.float32) / 255.0, 1/gamma)
-
-        imgName= f"{t}.png"
-        # 保存结果（需转换回 8-bit）
-        cv2.imwrite(imgName, (img_gamma * 255).astype(np.uint8))
-
+from tools import *
+def reverseGamma(img):
+    mask = img <= 0.04045
+    linear = np.zeros_like(img)
+    linear[mask] = img[mask] / 12.92
+    linear[~mask] = ((img[~mask] + 0.055) / 1.055) ** 2.4
+    return linear
 def Gamma(img):
     # img_encoded = cv2.imread(folderPath)
+    mask = img <= 0.0031308
+    srgb = np.zeros_like(img)
+    srgb[mask] = img[mask] * 12.92
+    srgb[~mask] = 1.055 * (img[~mask] ** (1/2.4)) - 0.055
+    return srgb
 
-    # 反 Gamma 处理
-    gamma = 2.2
-    img_gamma = np.power(img.astype(np.float32) , 1/gamma)
-    return img_gamma
+    # gamma = 2.2
+    # img_gamma = np.power(img.astype(np.float64) , gamma)
     # imgName= folderPath.replace(".jpg","_reversegamma.jpg")
     # # 保存结果（需转换回 8-bit）
     # cv2.imwrite(imgName, (img_gamma * 255).astype(np.uint8))
-def Save(img, imgName):
-    
-    cv2.imwrite(imgName, (img * 255).astype(np.uint8))
-def getCTstr(file_path):
-    file_path=str(file_path)
-    if 'U30' in file_path:
-        return 'U30'
-    elif 'CWF' in file_path:
-        return 'CWF'
-    elif 'D50' in file_path:
-        return 'D50'
-    elif 'H' in file_path:
-        return 'H'
+
 def ccmApply(img,ccm):
     imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # 转为RGB
     image_linear = imgRGB.astype(np.float64) / 255.0  # 归一化到[0,1]
@@ -91,10 +35,71 @@ def ccmApply(img,ccm):
 
     # 5. 裁剪并转换到8位
     return corrected_image
+def rgb2yuv(rgb):
+    if (rgb.ndim != 3) or (rgb.shape[2] != 3):
+        raise ValueError("输入必须是形状为(N, 3)的RGB数组")
+    r=rgb[:,:,0]
+    g=rgb[:,:,1]
+    b=rgb[:,:,2]
+    y = 0.299 * r + 0.587 * g + 0.114 * b
+    u = -0.147 * r - 0.289 * g + 0.436 * b + 0.5
+    v =  0.615 * r - 0.515 * g - 0.100 * b + 0.5
+
+    yuv = np.stack((y, u, v), axis=-1)
+    yuv = np.clip(yuv, 0, 1)  # 确保YUV值在0-1范围内
+    return yuv
+def yuv2rgb(yuv):
+    if (yuv.ndim != 3) or (yuv.shape[2] != 3):
+        raise ValueError("输入必须是形状为(N, 3)的RGB数组")
+
+
+    y=yuv[:,:,0]
+    u=yuv[:,:,1]-0.5
+    v=yuv[:,:,2]-0.5
+
+    r = y + 1.140 * v
+    g = y - 0.395 * u - 0.581 * v
+    b = y + 2.032 * u
+
+    rgb = np.stack((r, g, b), axis=-1)
+    rgb = np.clip(rgb, 0, 1)  # 确保RGB值在0-1范围内
+    return rgb
+
+def Contrast(img):
+    contrastConfig = {
+    'LUM_0' :50,
+    'LUM_32': 80,
+    'LUM_64' :100,
+    'LUM_96' : 100,
+    'LUM_128' : 100,
+    'LUM_160' :100,
+    'LUM_192' : 110,
+    'LUM_224' : 140,
+    'LUM_256' : 200,
+    }
+    config=[50,80,100,100,100,100,110,140,200]
+    contrastRange = [0,32,64,96,128,160,192,224,256]
+    yuv= rgb2yuv(img)
+    y=yuv[:,:,0]
+    gains=np.ones_like(y)  
+    for i in  range(len(contrastRange)-1):
+        rangeLeft=contrastRange[i]
+        rangeRight=contrastRange[i+1] if i+1 < len(contrastRange) else 256
+
+        mask=(y*256>=rangeLeft) & (y*256<rangeRight)
+        gains[mask]=(y[mask]*256- rangeLeft)/(rangeRight- rangeLeft)* config[i+1]/100.0+(rangeRight-y[mask]*256)/(rangeRight- rangeLeft)* config[i]/100.0
+
+    y=y*gains
+    yuv[:, :, 0] = y  # 更新Y通道
+    yuv=np.clip(yuv,0,1)
+
+    rgb= yuv2rgb(yuv)
+
+    return rgb
 def main():
 
     # Gamma(r"C:\serialPortVisualization\corrected_image.jpg")
-    folderPath = r"C:\serialPortVisualization\data\0814_1_rgb2"
+    folderPath = r"C:\serialPortVisualization\data\0815_1_ColorChecker_TotalImage"
     yamlFile='ccmDict.yaml'
 
 
@@ -103,18 +108,18 @@ def main():
 
     for path, basename in zip(full_paths, basenames):
         typeCT=getCTstr(basename)
+        print(f'Processing: {path}, Type: {typeCT}')
 
         # print   (yamlData['D50'])
         CCM= np.array(yamlData[typeCT])
-        print (CCM.shape)
-        print(CCM)
+        print(npToString(CCM))
         img= cv2.imread(path)
         img_CCM= ccmApply(img,CCM)
-        img_CCM = np.clip(img_CCM, 0, 1)
-
+        img_CCM = np.clip(img_CCM, 0, 1) #img_CCM  范围0-1
         img_Gamma= Gamma(img_CCM)   
+        # img_Gamma=Contrast(img_Gamma)
 
-        img_Gamma = (img_Gamma * 255).astype(np.uint8)
+        img_Gamma = (img_CCM * 255).astype(np.uint8) #img_CCM  范围0-1 
         img_Gamma = np.clip(img_Gamma, 0, 255)
 
         imgName= basename+'_CCM.jpg'

@@ -6,5 +6,6 @@ output/*
 *.yaml
 *.png
 *.jpg
+*.xlsx
 
 __pycache__/*
