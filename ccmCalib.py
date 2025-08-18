@@ -1,15 +1,28 @@
 import numpy as np
 from scipy.optimize import minimize
+from scipy.optimize import NonlinearConstraint
+from scipy.optimize import least_squares
 import cv2
 import os
 import yaml
 from tools import *
+from skimage.color import rgb2lab
 def reverseGamma(img):
     mask = img <= 0.04045
     linear = np.zeros_like(img)
     linear[mask] = img[mask] / 12.92
     linear[~mask] = ((img[~mask] + 0.055) / 1.055) ** 2.4
+    linear=np.clip(linear,0,1)
+
     return linear
+def Gamma(img):
+    
+    # img_encoded = cv2.imread(folderPath)
+    mask = img <= 0.0031308
+    srgb = np.zeros_like(img)
+    srgb[mask] = img[mask] * 12.92
+    srgb[~mask] = 1.055 * (img[~mask] ** (1/2.4)) - 0.055
+    return srgb
 IDEAL_RGB = np.array([
       [0.447	,0.317	,0.265],
       [0.764	,0.58	,0.501],
@@ -37,8 +50,13 @@ IDEAL_RGB = np.array([
       [0.191	,0.194	,0.199],
     ])  
 # IDEAL_LINEAR_RGB = IDEAL_RGB * 255.0  # 逆Gamma处理后的理想RGB值
-IDEAL_LINEAR_RGB = np.power(IDEAL_RGB,1/2.2) # 逆Gamma处理后的理想RGB值
+# IDEAL_LINEAR_RGB = np.power(IDEAL_RGB,1/2.2) # 逆Gamma处理后的理想RGB值
+# IDEAL_LINEAR_RGB = IDEAL_RGB**(2.2)# 逆Gamma处理后的理想RGB值
+# IDEAL_LINEAR_RGB=np.clip(IDEAL_LINEAR_RGB,0,1)  # 确保在0-1范围内
 IDEAL_LINEAR_RGB = reverseGamma(IDEAL_RGB) # 逆Gamma处理后的理想RGB值
+gammaRGB=Gamma(IDEAL_LINEAR_RGB) # Gamma处理后的理想RGB值
+print(f"===IDEAL_LINEAR_RGB===\n{npToString(IDEAL_LINEAR_RGB)}")
+print(f"===gammaRGB===\n{npToString(gammaRGB)}")
 
 def readCSV(file_path):
     import csv
@@ -57,6 +75,23 @@ def readCSV(file_path):
             colorArr.append([float(R), float(G), float(B)])
         print(colorArr)
         return np.array(colorArr, dtype=np.float64)
+def rgb_to_lab(rgb):
+    """
+    将sRGB值转换为CIE Lab
+    输入: 
+        rgb : [R, G, B] (0-255整数或0-1浮点数)
+    输出: 
+        Lab: [L, a, b] (L: 0-100, a/b: -128~127)
+    """
+    # # 如果输入是0-255整数，先归一化为0-1浮点
+    # if isinstance(rgb, np.ndarray) and rgb.dtype == np.uint8:
+    #     rgb = rgb.astype(np.float32) / 255.0
+    # elif isinstance(rgb, (list, tuple)):
+    #     rgb = np.array(rgb, dtype=np.float32) / 255.0
+    
+    # 调用scikit-image的转换函数
+    lab = rgb2lab(rgb[np.newaxis, np.newaxis, :]).squeeze()
+    return lab
 def RGB2Lab(rgb):
     """将RGB颜色转换为Lab颜色空间"""
     # 这里可以使用OpenCV或其他库进行转换
@@ -70,7 +105,8 @@ class CCM_3x3:
     def __init__(self,input,output):
         self.input = input
         self.output = output
-        self.ccm = np.eye(3, 3)  # 初始化为单位矩阵
+        # self.ccm = np.ones(3, 3)  # 初始化为单位矩阵
+        self.ccm = np.eye(3)  # 初始化为单位矩阵
         # 仅用shape进行判断
         if input.shape != output.shape:
             raise ValueError("input和output的形状必须相同")
@@ -82,14 +118,22 @@ class CCM_3x3:
         input=input.T
         output=output.T
         ccm = x.reshape(3, 3)  # 将扁平化的参数恢复为3x3矩阵
-        predicted = np.dot(ccm,input )  # 应用颜色校正
-     
-        sumTmp=np.sqrt(np.sum((predicted - output)**2,axis=0))
+        predicted = np.dot(ccm,input)  # 应用颜色校正
+
+        labPredicted= rgb_to_lab(predicted.T)  # 转换为Lab颜色空间
+        labOutput = rgb_to_lab(output.T)  # 转换为Lab颜色空间
+        labPredicted=labPredicted.T
+        labOutput=labOutput.T
+        sumTmp=np.sqrt(np.sum((labPredicted - labOutput)**2,axis=0))
+        # sumTmp[18]*=3
+        # sumTmp[19]*=3
         # sumTmp[20]*=3
-        # sumTmp[23]*=3
-        error = np.mean(sumTmp)  # MSE误差
+        # sumTmp[21]*=3
+        # sumTmp=np.sqrt(np.sum((predicted - output)**2,axis=0))
+      
+        error = np.sum(sumTmp)  # MSE误差
         # print(f"error:{error}")
-        # return (predicted - output).flatten()
+        # return((labPredicted - labOutput)**2).flatten()
         return error
 
     def infer_image(self):
@@ -111,7 +155,6 @@ class CCM_3x3:
             'fun': lambda x: C @ x - np.ones(3),
         } )
         
-
         # constraints.append( {
         #     'type': 'ineq', 
         #     'fun': lambda x: Cin @ x,
@@ -137,8 +180,8 @@ class CCM_3x3:
             args=(self.input, self.output),
             constraints=constraints,
             # bounds=bounds,
-            method='trust-constr',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
-            options={'maxiter': 100000,'disp': True}
+            method='SLSQP',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
+            options={'maxiter': 100000,'rhobeg': 1.0, 'rhoend': 1e-12,'disp': True}
         )
         # 打印优化结果的详细信息
   
@@ -153,8 +196,9 @@ class CCM_3x3:
 
 def ccmInfer(csv_path):
     input_arr=readCSV(csv_path)
-    # input_arr = input_arr/input_arr[18]
+    input_arr = input_arr/input_arr[18]
     # input_arr = input_arr*255
+
     ccmCalib= CCM_3x3(input_arr, IDEAL_RGB)
     ccm= ccmCalib.infer_image()
     return ccm
@@ -195,22 +239,7 @@ def get_paths(folder_name, suffix=".csv"):
         print(f"错误: {e}")
         return [], []
 
-def convert_numpy(obj):
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, (np.float32, np.float64)):
-            return float(obj)
-        elif isinstance(obj, (np.int32, np.int64)):
-            return int(obj)
-        return obj
-def saveYaml(dictData, basename):
-    
-    
-    # 保存为 YAML 文件
-    with open(f'{basename}.yaml', 'w') as f:
-        yaml.dump(dictData, f, default_flow_style=None, sort_keys=False,width=float("inf"))
-    
-    print(f"Calibration results saved to {basename}.yaml")
+
 def folder_to_csv(folder_path):
     full_paths, basenames = get_paths(folder_path, suffix=".csv")
     ccmDict = {}

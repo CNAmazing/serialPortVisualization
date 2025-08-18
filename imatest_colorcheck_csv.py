@@ -183,7 +183,7 @@ class imatest_clorchek_csv:
         self.write_csv(all_data, grouped, report, output_file)
 if __name__ == '__main__':
 
-    folderPath = r"C:\serialPortVisualization\data\0815_3"
+    folderPath = r"C:\serialPortVisualization\data\0818_1"
 
     imagePath,basenames = get_paths(folderPath,suffix=".csv")
     paths = [

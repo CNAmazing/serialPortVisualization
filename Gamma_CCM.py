@@ -10,12 +10,14 @@ def reverseGamma(img):
     linear[~mask] = ((img[~mask] + 0.055) / 1.055) ** 2.4
     return linear
 def Gamma(img):
+    
     # img_encoded = cv2.imread(folderPath)
     mask = img <= 0.0031308
     srgb = np.zeros_like(img)
     srgb[mask] = img[mask] * 12.92
     srgb[~mask] = 1.055 * (img[~mask] ** (1/2.4)) - 0.055
     return srgb
+    return img**(1/2.2)
 
     # gamma = 2.2
     # img_gamma = np.power(img.astype(np.float64) , gamma)
@@ -24,15 +26,12 @@ def Gamma(img):
     # cv2.imwrite(imgName, (img_gamma * 255).astype(np.uint8))
 
 def ccmApply(img,ccm):
-    imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # 转为RGB
-    image_linear = imgRGB.astype(np.float64) / 255.0  # 归一化到[0,1]
-
+    
     # 3. 应用CCM矫正（使用左乘）
-    h, w = image_linear.shape[:2] #H*W*3
-    rgb_flat = image_linear.reshape(-1, 3) # (h*w, 3)
+    h, w = img.shape[:2] #H*W*3
+    rgb_flat = img.reshape(-1, 3) # (h*w, 3)
     corrected_flat = np.dot(rgb_flat, ccm.T)  # 等价于 (ccm @ rgb_flat.T).T
     corrected_image = corrected_flat.reshape(h, w, 3)
-
     # 5. 裁剪并转换到8位
     return corrected_image
 def rgb2yuv(rgb):
@@ -96,10 +95,14 @@ def Contrast(img):
     rgb= yuv2rgb(yuv)
 
     return rgb
+def img_uint8_to_float(img):
+    imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # 转为RGB
+    image_linear = imgRGB.astype(np.float64) / 255.0  # 归一化到[0,1]
+    return image_linear
 def main():
 
     # Gamma(r"C:\serialPortVisualization\corrected_image.jpg")
-    folderPath = r"C:\serialPortVisualization\data\0815_1_ColorChecker_TotalImage"
+    folderPath = r"C:\serialPortVisualization\data\0818_RGB4"
     yamlFile='ccmDict.yaml'
 
 
@@ -114,16 +117,16 @@ def main():
         CCM= np.array(yamlData[typeCT])
         print(npToString(CCM))
         img= cv2.imread(path)
-        img_CCM= ccmApply(img,CCM)
-        img_CCM = np.clip(img_CCM, 0, 1) #img_CCM  范围0-1
-        img_Gamma= Gamma(img_CCM)   
-        # img_Gamma=Contrast(img_Gamma)
+        img=img_uint8_to_float(img)
+        img= ccmApply(img,CCM)
+        img = np.clip(img, 0, 1) #img_CCM  范围0-1
+        img= Gamma(img) #img_Gamma  范围0-1
 
-        img_Gamma = (img_CCM * 255).astype(np.uint8) #img_CCM  范围0-1 
-        img_Gamma = np.clip(img_Gamma, 0, 255)
+        img = (img * 255).astype(np.uint8) #img_CCM  范围0-1 
+        img = np.clip(img, 0, 255)
 
         imgName= basename+'_CCM.jpg'
-        cv2.imwrite(imgName, cv2.cvtColor(img_Gamma, cv2.COLOR_RGB2BGR))
+        cv2.imwrite(imgName, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
 
 main()
 # img_Tmp = cv2.imread(imgName)

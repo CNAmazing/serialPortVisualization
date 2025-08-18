@@ -2,6 +2,22 @@ import os
 from pathlib import Path
 import yaml
 import numpy as np
+def convert_numpy(obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, (np.int32, np.int64)):
+            return int(obj)
+        return obj
+def saveYaml(dictData, basename):
+    
+    
+    # 保存为 YAML 文件
+    with open(f'{basename}.yaml', 'w') as f:
+        yaml.dump(dictData, f, default_flow_style=None, sort_keys=False,width=float("inf"))
+    
+    print(f"Calibration results saved to {basename}.yaml")
 def loadYaml(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
         data = yaml.safe_load(f)
@@ -36,9 +52,9 @@ def getCTstr(file_path):
         return 'CWF'
     elif 'D50' in file_path:
         return 'D50'
-    elif 'H' in file_path:
+    elif 'H_' in file_path:
         return 'H'
-    elif 'A' in file_path:
+    elif 'A_' in file_path:
         return 'A'
     elif 'D60' in file_path:
         return 'D60'

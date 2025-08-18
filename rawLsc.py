@@ -560,7 +560,7 @@ def LSC(image, gainList):
     # 应用增益
     result = np.clip(image * gain_map, 0, 1023).astype(np.uint16)
     return result
-def AWB(image, red_gain, blue_gain):
+def AWB(image, awbParam):
     """
     应用红蓝通道白平衡矫正
     :param image: 输入的RAW图像 (Bayer模式)
@@ -568,14 +568,16 @@ def AWB(image, red_gain, blue_gain):
     :param blue_gain: 蓝色通道增益系数
     :return: 白平衡矫正后的图像
     """
+    rGain,grGain,gbGain,bGain = awbParam
     # 创建输出图像
     balanced = image.copy()
     
     # 矫正红色通道 (R位于偶数行偶数列)
-    balanced[::2, ::2] = np.clip(image[::2, ::2] * red_gain, 0, 1023).astype(np.uint16)
-    
+    balanced[::2, ::2] = np.clip(image[::2, ::2] * rGain, 0, 1023).astype(np.uint16)
+    balanced[::2, 1::2] = np.clip(image[::2, 1::2] * grGain, 0, 1023).astype(np.uint16)
+    balanced[1::2, ::2] = np.clip(image[::2, 1::2] * gbGain, 0, 1023).astype(np.uint16)
     # 矫正蓝色通道 (B位于奇数行奇数列)
-    balanced[1::2, 1::2] = np.clip(image[1::2, 1::2] * blue_gain, 0, 1023).astype(np.uint16)
+    balanced[1::2, 1::2] = np.clip(image[1::2, 1::2] * bGain, 0, 1023).astype(np.uint16)
     
     return balanced
 def adjust_rgb_by_blocks_optimized(image: np.ndarray, gainList) -> np.ndarray:
@@ -810,6 +812,7 @@ def Demosaic(bayer_pgm):
 
 def lenShadingCorrection(image_folder):
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
+    AWBList=loadYaml(r'C:\serialPortVisualization\AWBResults.yaml')
     for path,basename in zip(full_paths,basenames):
         print(f"Processing image: {path}...")   
         keyCT= getCTstr(path)
@@ -827,35 +830,21 @@ def lenShadingCorrection(image_folder):
                 gainList.append(mesh_Gr)
                 gainList.append(mesh_Gb)
                 gainList.append(mesh_B)
-        '''=============================pillow============================='''
-        # pgm_image = read_pgm_with_pillow(path)
-        # # pixels = pgm_image.load() 
-        # data = np.array(pgm_image)
-        # # print(f"图像尺寸: {data.shape}")  # (高度, 宽度)
-        # print(data[0,0],data[0,1],'\n',data[1,0],data[1,1])
-        
-        # pixels_10bit = data >> 6
-        # print(pixels_10bit[0,0],pixels_10bit[0,1],'\n',pixels_10bit[1,0],pixels_10bit[1,1])
-        # result=adjust_raw_by_blocks_vectorized_pillow(pixels_10bit,gainList)
-
-        # result = Image.fromarray(result.astype(np.uint16))
-
-        # result.save(f'{basename}_NewCalib.pgm')
-        """
-        =============================opencv=============================
-        """
-        pgm_image = read_pgm_with_opencv(path)
-        awbList={'H':(1.793,0.825),'A':(1.750,0.923),'U30':(1.897,1.031),'CWF':(1.619,1.280),'D50':(1.393,1.312),'D60':(1.311,1.385)}
+   
+        img = read_pgm_with_opencv(path)
+        # awbList={'H':(1.793,0.825),'A':(1.750,0.923),'U30':(1.85,1.031),'CWF':(1.619,1.280),'D50':(1.393,1.312),'D60':(1.311,1.385)}
         # awbList={'H':(1.818,0.863),'U30':(1.897,1.031),'CWF':(1.619,1.280),'D50':(1.406,1.321)}
-        rGain,bGain=awbList[keyCT]
-        result=LSC(pgm_image,gainList)
-        rgb_white= AWB(result, rGain, bGain)  # 假设红蓝通道增益为1.0
-        rgb=Demosaic(rgb_white)
+        awbParam=AWBList[keyCT]
+        img=LSC(img,gainList)
+        imgLSCTmp= img.copy()
+        img= AWB(img,awbParam)  # 假设红蓝通道增益为1.0
 
-        raw_8bit = rgb/1023 * 255  # 将16位数据转换为8位
-        raw_8bit = raw_8bit.astype(np.uint8)
-        cv2.imwrite(f'{basename}_rgb.jpg', raw_8bit)
-        writePgm(result, basename)  
+        img=Demosaic(img)
+
+        img = img/1023 * 255  # 将16位数据转换为8位
+        img = img.astype(np.uint8)
+        cv2.imwrite(f'{basename}_LSC_AWB.jpg', img)
+        # writePgm(imgLSCTmp, basename)  
         
 def lenShadingCorrectionFor_Png(image_folder,yaml_file=None):
     full_paths, basenames = get_paths(image_folder,suffix=".png")
@@ -948,9 +937,11 @@ def readRgm2AWB(imagePath,roi=None):
     g_mean = (g1_mean + g2_mean) / 2.0 if (g1_count + g2_count) > 0 else 0.0
     rGain= g_mean / r_mean if r_mean > 0 else 0.0
     bGain= g_mean / b_mean if b_mean > 0 else 0.0
+    grGain= g_mean / g1_mean if g1_mean > 0 else 0.0
+    gbGain= g_mean / g2_mean if g2_mean > 0 else 0.0
     # print(f"R_mean: {r_mean:2f}, G_mean: {g_mean:2f}, B_mean: {b_mean:2f}, G1_mean: {g1_mean:2f}, G2_mean: {g2_mean:2f}")
-    # print(f"rGain={rGain:3f}, bGain={bGain:3f}")
-    return rGain,bGain
+    print(f"rGain={rGain:3f},grGain={grGain:3f},gbGain={gbGain:3f} bGain={bGain:3f}")
+    return rGain,grGain,gbGain,bGain
     # return {
     #     'R_mean': r_mean,
     #     'G_mean': g_mean,
@@ -960,8 +951,9 @@ def readRgm2AWB(imagePath,roi=None):
     
     # }
 def folderPocessingAWB(image_folder):
-    rois=[(962,1440,1200,1672)]
+    rois=[(1064,1436,1200,1610),(332,1440,500,1600),(650,1440,850,1600)]
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
+    AWBDict={}
     for path,basename in zip(full_paths,basenames):
         print(f"Processing image: {path}...")
         ct=getCTstr(basename)
@@ -969,23 +961,45 @@ def folderPocessingAWB(image_folder):
         rbGain=[]
         for roi in rois:
             print(f"Processing ROI: {roi}")
-            rGain,bGain=readRgm2AWB(path,roi)
-            rbGain.append((rGain,bGain))
+            rGain,grGain,gbGain,bGain=readRgm2AWB(path,roi)
+            rbGain.append((rGain,grGain,gbGain,bGain))
             print(f"ROI {roi} - R Gain: {rGain:.3f}, B Gain: {bGain:.3f}")
         # 计算平均增益
         rbGain = np.mean(rbGain, axis=0)
+        AWBDict[ct] = convert_numpy(rbGain)
+        print(f"Average R Gain: {rbGain[0]:.3f},Average Gr Gain: {rbGain[1]:.3f},Average Gb Gain: {rbGain[2]:.3f}, Average B Gain: {rbGain[3]:.3f}")
+    saveYaml(AWBDict, 'AWBResults')
+def image_Concatenated(image_folder):
+    full_paths, basenames = get_paths(image_folder,suffix=".jpg")
+    img0=cv2.imread(full_paths[0], cv2.IMREAD_UNCHANGED)
+    imgW=img0.shape[1]
+    imgH=img0.shape[0]
+    n=len(full_paths)
+    imgConcatenated = np.zeros((imgH, imgW*n, 3), dtype=np.uint8)
+    x_offset = 0
 
-        print(f"Average R Gain: {rbGain[0]:.3f}, Average B Gain: {rbGain[1]:.3f}")
+    keyWordList=['H_','A_','U30','CWF','D50','D60']
+    def get_priority(word):
+        for idx, keyword in enumerate(keyWordList):
+            if keyword in word:
+                return idx  # 返回匹配到的优先级（越小越靠前）
+        return float('inf')  # 没匹配到的放在最后
+    full_paths = sorted(full_paths, key=get_priority)
+    print("Sorted paths based on priority:", full_paths)
+    for path,basename in zip(full_paths,basenames):
+        img= cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        imgConcatenated[0:imgH, x_offset:x_offset+imgW] = img
+        x_offset += imgW
+    cv2.imwrite('ConcatenatedImage.jpg', imgConcatenated)
+
 def main():
 
     """"=============================标定代码============================="""
     # folder_path= r'C:\serialPortVisualization\data\0815_2_LSC'
     # lenShadingCalibration(folder_path)
     """"=============================应用代码============================="""
-    folder_path=r'C:\serialPortVisualization\data\0815_2' 
+    folder_path=r'C:\serialPortVisualization\data\0818_1' 
     lenShadingCorrection(folder_path)
-
-    
 
     """=====================================pngLSC====================================="""
     # folder_path=r'C:\serialPortVisualization\data\0812_1'
@@ -997,8 +1011,13 @@ def main():
     '''=====================pgm转raw========================'''
 
     """===============AWB标定=================="""
-    # folder_path=r'C:\serialPortVisualization\data\0815_2_AfterWhite'
+    # folder_path=r'C:\serialPortVisualization\data\0818_1'
     # folderPocessingAWB(folder_path)
+
+    ''' =================合成图像=================='''
+    # folder_path=r'C:\serialPortVisualization\data\0818_3NoLSC'
+    # image_Concatenated(folder_path)
+
     
 
 
