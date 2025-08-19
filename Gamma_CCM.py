@@ -16,7 +16,7 @@ def Gamma(img):
     srgb = np.zeros_like(img)
     srgb[mask] = img[mask] * 12.92
     srgb[~mask] = 1.055 * (img[~mask] ** (1/2.4)) - 0.055
-    return srgb
+    # return srgb
     return img**(1/2.2)
 
     # gamma = 2.2
@@ -31,6 +31,14 @@ def ccmApply(img,ccm):
     h, w = img.shape[:2] #H*W*3
     rgb_flat = img.reshape(-1, 3) # (h*w, 3)
     corrected_flat = np.dot(rgb_flat, ccm.T)  # 等价于 (ccm @ rgb_flat.T).T
+    corrected_image = corrected_flat.reshape(h, w, 3)
+    # 5. 裁剪并转换到8位
+    return corrected_image
+def ccmApply_3x4(img,ccm):
+    # 3. 应用CCM矫正（使用左乘）
+    h, w = img.shape[:2] #H*W*3
+    rgb_flat = img.reshape(-1, 3) # (h*w, 3)
+    corrected_flat = np.dot(rgb_flat, ccm[:3,:].T)+ccm[3,:]  # 等价于 (ccm @ rgb_flat.T).T
     corrected_image = corrected_flat.reshape(h, w, 3)
     # 5. 裁剪并转换到8位
     return corrected_image
@@ -102,7 +110,7 @@ def img_uint8_to_float(img):
 def main():
 
     # Gamma(r"C:\serialPortVisualization\corrected_image.jpg")
-    folderPath = r"C:\serialPortVisualization\data\0818_RGB4"
+    folderPath = r"C:\serialPortVisualization\data\0819_4"
     yamlFile='ccmDict.yaml'
 
 
@@ -118,10 +126,13 @@ def main():
         print(npToString(CCM))
         img= cv2.imread(path)
         img=img_uint8_to_float(img)
-        img= ccmApply(img,CCM)
+        # img= ccmApply(img,CCM)
+        img= ccmApply_3x4(img,CCM)
         img = np.clip(img, 0, 1) #img_CCM  范围0-1
         img= Gamma(img) #img_Gamma  范围0-1
 
+        img= Contrast(img)
+        #
         img = (img * 255).astype(np.uint8) #img_CCM  范围0-1 
         img = np.clip(img, 0, 255)
 

@@ -504,6 +504,8 @@ def LSC(image, gainList):
     """
     向量化版本，显著提高速度
     """
+    Factor=0.85
+
     mesh_R, mesh_Gr, mesh_Gb, mesh_B = gainList
     rows,cols  = image.shape[:2]
     m = len(mesh_R) - 1
@@ -558,7 +560,7 @@ def LSC(image, gainList):
                           y_norm[mask] * x_norm[mask] * q22)
     
     # 应用增益
-    result = np.clip(image * gain_map, 0, 1023).astype(np.uint16)
+    result = np.clip(image * gain_map*Factor, 0, 1023).astype(np.uint16)
     return result
 def AWB(image, awbParam):
     """
@@ -812,10 +814,11 @@ def Demosaic(bayer_pgm):
 
 def lenShadingCorrection(image_folder):
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
-    AWBList=loadYaml(r'C:\serialPortVisualization\AWBResults.yaml')
+    AWBList=loadYaml(r'C:\serialPortVisualization\AWBResultsLSC.yaml')
     for path,basename in zip(full_paths,basenames):
         print(f"Processing image: {path}...")   
         keyCT= getCTstr(path)
+        
         yaml_file = fr'C:\serialPortVisualization\data\0815_1_Config\isp_sensor_raw{keyCT}.yaml'
         dataYaml = loadYaml(yaml_file)
         gainList=[]
@@ -835,7 +838,7 @@ def lenShadingCorrection(image_folder):
         # awbList={'H':(1.793,0.825),'A':(1.750,0.923),'U30':(1.85,1.031),'CWF':(1.619,1.280),'D50':(1.393,1.312),'D60':(1.311,1.385)}
         # awbList={'H':(1.818,0.863),'U30':(1.897,1.031),'CWF':(1.619,1.280),'D50':(1.406,1.321)}
         awbParam=AWBList[keyCT]
-        img=LSC(img,gainList)
+        # img=LSC(img,gainList)
         imgLSCTmp= img.copy()
         img= AWB(img,awbParam)  # 假设红蓝通道增益为1.0
 
@@ -951,7 +954,7 @@ def readRgm2AWB(imagePath,roi=None):
     
     # }
 def folderPocessingAWB(image_folder):
-    rois=[(1064,1436,1200,1610),(332,1440,500,1600),(650,1440,850,1600)]
+    rois=[(400,500,2000,1500)]
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
     AWBDict={}
     for path,basename in zip(full_paths,basenames):
@@ -995,10 +998,10 @@ def image_Concatenated(image_folder):
 def main():
 
     """"=============================标定代码============================="""
-    # folder_path= r'C:\serialPortVisualization\data\0815_2_LSC'
+    # folder_path= r'C:\serialPortVisualization\data\0819_1_LSC'
     # lenShadingCalibration(folder_path)
     """"=============================应用代码============================="""
-    folder_path=r'C:\serialPortVisualization\data\0818_1' 
+    folder_path=r'C:\serialPortVisualization\data\0819_1' 
     lenShadingCorrection(folder_path)
 
     """=====================================pngLSC====================================="""
@@ -1011,11 +1014,11 @@ def main():
     '''=====================pgm转raw========================'''
 
     """===============AWB标定=================="""
-    # folder_path=r'C:\serialPortVisualization\data\0818_1'
+    # folder_path=r'C:\serialPortVisualization\data\0819_1AWBnewCalib'
     # folderPocessingAWB(folder_path)
 
     ''' =================合成图像=================='''
-    # folder_path=r'C:\serialPortVisualization\data\0818_3NoLSC'
+    # folder_path=r'C:\serialPortVisualization\data\0819_5'
     # image_Concatenated(folder_path)
 
     

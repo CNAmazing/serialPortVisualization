@@ -107,6 +107,7 @@ class CCM_3x3:
         self.output = output
         # self.ccm = np.ones(3, 3)  # 初始化为单位矩阵
         self.ccm = np.eye(3)  # 初始化为单位矩阵
+        
         # 仅用shape进行判断
         if input.shape != output.shape:
             raise ValueError("input和output的形状必须相同")
@@ -120,18 +121,18 @@ class CCM_3x3:
         ccm = x.reshape(3, 3)  # 将扁平化的参数恢复为3x3矩阵
         predicted = np.dot(ccm,input)  # 应用颜色校正
 
-        labPredicted= rgb_to_lab(predicted.T)  # 转换为Lab颜色空间
-        labOutput = rgb_to_lab(output.T)  # 转换为Lab颜色空间
-        labPredicted=labPredicted.T
-        labOutput=labOutput.T
-        sumTmp=np.sqrt(np.sum((labPredicted - labOutput)**2,axis=0))
+        # labPredicted= rgb_to_lab(predicted.T)  # 转换为Lab颜色空间
+        # labOutput = rgb_to_lab(output.T)  # 转换为Lab颜色空间
+        # labPredicted=labPredicted.T
+        # labOutput=labOutput.T
+        # sumTmp=np.sqrt(np.sum((labPredicted - labOutput)**2,axis=0))
         # sumTmp[18]*=3
         # sumTmp[19]*=3
         # sumTmp[20]*=3
         # sumTmp[21]*=3
-        # sumTmp=np.sqrt(np.sum((predicted - output)**2,axis=0))
+        sumTmp=np.sqrt(np.sum((predicted - output)**2,axis=0))
       
-        error = np.sum(sumTmp)  # MSE误差
+        error = np.mean(sumTmp)  # MSE误差
         # print(f"error:{error}")
         # return((labPredicted - labOutput)**2).flatten()
         return error
@@ -178,7 +179,7 @@ class CCM_3x3:
             self.loss,  # 包装loss函数
             x,  
             args=(self.input, self.output),
-            constraints=constraints,
+            # constraints=constraints,
             # bounds=bounds,
             method='SLSQP',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
             options={'maxiter': 100000,'rhobeg': 1.0, 'rhoend': 1e-12,'disp': True}
@@ -193,13 +194,107 @@ class CCM_3x3:
         return optimized_ccm
     
 
+class CCM_3x4:
+    def __init__(self,input,output):
+        self.input = input
+        self.output = output
+        # self.ccm = np.ones(3, 3)  # 初始化为单位矩阵
+        self.ccmR = np.eye(3)  # 初始化为单位矩阵
+        self.ccmT=np.zeros((1,3)) # 初始化为零向量
+        self.ccm = np.vstack((self.ccmR, self.ccmT))
+        # 仅用shape进行判断
+        if input.shape != output.shape:
+            raise ValueError("input和output的形状必须相同")
+        if input.shape[1] != 3:
+            raise ValueError("最后一个维度必须是RGB颜色")
+        self.m, self.n = input.shape[:2]  # 获取输入图像的形状
+       
+    def loss(self, x, input, output):
+        input=input.T
+        output=output.T
+        ccm = x.reshape(4, 3)  # 将扁平化的参数恢复为3x3矩阵
+        predicted = np.dot(ccm[:3,:],input) +ccm[3,:].reshape(-1,1) # 应用颜色校正
+
+        # labPredicted= rgb_to_lab(predicted.T)  # 转换为Lab颜色空间
+        # labOutput = rgb_to_lab(output.T)  # 转换为Lab颜色空间
+        # labPredicted=labPredicted.T
+        # labOutput=labOutput.T
+        # sumTmp=np.sqrt(np.sum((labPredicted - labOutput)**2,axis=0))
+        # sumTmp[18]*=3
+        # sumTmp[19]*=3
+        # sumTmp[20]*=3
+        # sumTmp[21]*=3
+        sumTmp=np.sqrt(np.sum((predicted - output)**2,axis=0))
+      
+        error = np.mean(sumTmp)  # MSE误差
+        # print(f"error:{error}")
+        # return((labPredicted - labOutput)**2).flatten()
+        return error
+
+    def infer_image(self):
+        x = self.ccm.flatten()  # 初始猜测值
+
+
+        C = np.zeros((3, 12))
+        for i in range(3):
+            C[i, 3*i : 3*i+3] = 1  # 每行对应矩阵M的一行的3个元素
+        print(f"===C===\n{npToString(C)}")
+        # Cin=np.zeros((1, 9))
+        # Cin[0, 4]=-1
+        # Cin[0, 8]=1
+
+        constraints = []
+        # 约束条件: CCM矩阵的每一行之和为1
+        constraints.append( {
+            'type': 'eq', 
+            'fun': lambda x: C @ x - np.ones(3),
+        } )
+        
+        # constraints.append( {
+        #     'type': 'ineq', 
+        #     'fun': lambda x: Cin @ x,
+        # } )
+        '''=====================最小二乘============================='''
+        # from scipy.optimize import least_squares
+
+        # 假设你的 self.loss 函数返回残差（residuals）而不是标量损失值
+        # result = least_squares(
+        #     self.loss,  # 这个函数现在应该返回残差向量而不是标量
+        #     x,
+        #     args=(self.input, self.output),
+        #     # bounds=bounds,  # least_squares 支持 bounds
+        #     method='trf',  # 或 'lm'（Levenberg-Marquardt，无约束时使用）
+        #     max_nfev=100000,
+        #     verbose=2
+        # )
+        '''=====================能量项优化============================='''
+        # bounds = [(-4, 4) for _ in range(9)]
+        result = minimize(
+            self.loss,  # 包装loss函数
+            x,  
+            args=(self.input, self.output),
+            # constraints=constraints,
+            # bounds=bounds,
+            method='SLSQP',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
+            options={'maxiter': 100000,'rhobeg': 1.0, 'rhoend': 1e-12,'disp': True}
+        )
+        # 打印优化结果的详细信息
+  
+
+        # 将优化结果恢复为CCM矩阵
+        optimized_ccm = result.x.reshape(4, 3)
+        print("===ccm===\n",npToString(optimized_ccm))
+
+        return optimized_ccm
+    
 
 def ccmInfer(csv_path):
     input_arr=readCSV(csv_path)
-    input_arr = input_arr/input_arr[18]
+    scale = 1.0/input_arr[18]
+    input_arr = input_arr * scale  # 将输入数据缩放到0-1范围
     # input_arr = input_arr*255
 
-    ccmCalib= CCM_3x3(input_arr, IDEAL_RGB)
+    ccmCalib= CCM_3x4(input_arr, IDEAL_LINEAR_RGB)
     ccm= ccmCalib.infer_image()
     return ccm
 
