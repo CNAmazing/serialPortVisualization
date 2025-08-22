@@ -66,7 +66,7 @@ def readCSV(file_path):
         
         # 获取第3行第2列(索引从0开始)
         colorArr=[]
-        startRow= 52
+        startRow= 58
         for i in range(24):
             rowIdx= startRow + i
             R = float(rows[rowIdx][1])
@@ -273,7 +273,7 @@ class CCM_3x4:
             self.loss,  # 包装loss函数
             x,  
             args=(self.input, self.output),
-            # constraints=constraints,
+            constraints=constraints,
             # bounds=bounds,
             method='SLSQP',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
             options={'maxiter': 100000,'rhobeg': 1.0, 'rhoend': 1e-12,'disp': True}
@@ -290,8 +290,8 @@ class CCM_3x4:
 
 def ccmInfer(csv_path):
     input_arr=readCSV(csv_path)
-    scale = 1.0/input_arr[18]
-    input_arr = input_arr * scale  # 将输入数据缩放到0-1范围
+    # scale = 1.0/input_arr[18]
+    # input_arr = input_arr * scale  # 将输入数据缩放到0-1范围
     # input_arr = input_arr*255
 
     ccmCalib= CCM_3x4(input_arr, IDEAL_LINEAR_RGB)
@@ -351,7 +351,7 @@ def folder_to_csv(folder_path):
     
 def main():
         
-    folder_path= r'C:\serialPortVisualization\data\0815_1_ColorChecker_Total_'
+    folder_path= r'C:\WorkSpace\serialPortVisualization\data\0821_4'
     folder_to_csv(folder_path)
 
    

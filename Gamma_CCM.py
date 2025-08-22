@@ -110,7 +110,7 @@ def img_uint8_to_float(img):
 def main():
 
     # Gamma(r"C:\serialPortVisualization\corrected_image.jpg")
-    folderPath = r"C:\serialPortVisualization\data\0819_4"
+    folderPath = r'C:\WorkSpace\serialPortVisualization\data\0821_4'
     yamlFile='ccmDict.yaml'
 
 
@@ -136,7 +136,7 @@ def main():
         img = (img * 255).astype(np.uint8) #img_CCM  范围0-1 
         img = np.clip(img, 0, 255)
 
-        imgName= basename+'_CCM.jpg'
+        imgName= basename+'_CCM.png'
         cv2.imwrite(imgName, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
 
 main()

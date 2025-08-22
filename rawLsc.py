@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+from scipy.optimize import minimize
 import os
 import json
 import yaml
@@ -106,6 +107,51 @@ def lsc_calib_rgb(image, mesh_h_nums=12, mesh_w_nums=16, sample_size=5,maxFactor
     mesh_g = max_g *maxFactor/ mesh_g
     mesh_b = max_b *maxFactor/ mesh_b
     return [mesh_r, mesh_g, mesh_b]
+def centerAvgL(image,radius=1):
+
+    h, w = image.shape[:2]
+    cx, cy = w // 2, h // 2
+    
+    y_start, y_end = cy - radius, cy + radius + 1
+    x_start, x_end = cx - radius, cx + radius + 1
+    
+    # 确保不越界
+    y_start = max(0, y_start)
+    y_end = min(h, y_end)
+    x_start = max(0, x_start)
+    x_end = min(w, x_end)
+    
+    center_region = image[y_start:y_end, x_start:x_end]
+    
+    return np.mean(center_region)
+def gainCorrection(image,gainList):
+
+    mesh_R, mesh_Gr, mesh_Gb, mesh_B = gainList
+    radius = 1  # 采样半径
+
+    Rmap=image[::2,::2]  # R通道
+    Grmap=image[::2,1::2]  # Gr通道
+    Gbmap=image[1::2,::2]  # Gb通道
+    Bmap=image[1::2,1::2]  # B通道
+    Rmean=np.mean(Rmap)
+    Grmean=np.mean(Grmap)
+    Gbmean=np.mean(Gbmap)
+    Bmean=np.mean(Bmap)
+    print(f"Rmean:{Rmean},Grmean:{Grmean},Gbmean:{Gbmean},Bmean:{Bmean}")
+    RmapCenterAvgL= centerAvgL(Rmap,radius)
+    GrmapCenterAvgL= centerAvgL(Grmap,radius)
+    GbmapCenterAvgL= centerAvgL(Gbmap,radius)
+    BmapCenterAvgL= centerAvgL(Bmap,radius)
+    print(f"RmapCenterAvgL:{RmapCenterAvgL},GrmapCenterAvgL:{GrmapCenterAvgL},GbmapCenterAvgL:{GbmapCenterAvgL},BmapCenterAvgL:{BmapCenterAvgL}")
+    Rgain=RmapCenterAvgL/Rmean
+    Grgain=GrmapCenterAvgL/Grmean
+    Gbgain=GbmapCenterAvgL/Gbmean
+    Bgain=BmapCenterAvgL/Bmean
+    mesh_R = mesh_R * Rgain
+    mesh_Gr = mesh_Gr * Grgain
+    mesh_Gb = mesh_Gb * Gbgain
+    mesh_B = mesh_B * Bgain
+    return mesh_R, mesh_Gr, mesh_Gb, mesh_B
 def lsc_calib(image, mesh_h_nums=24, mesh_w_nums=32, sample_size=3,maxFactor=1.0):
     """
     RGB图像的Lens Shading Correction校准
@@ -216,6 +262,12 @@ def lsc_calib(image, mesh_h_nums=24, mesh_w_nums=32, sample_size=3,maxFactor=1.0
     mesh_Gb=  max_Gb *maxFactor/ mesh_Gb
     mesh_Gr = max_Gr *maxFactor/ mesh_Gr
     mesh_B = max_B *maxFactor/ mesh_B
+    # corrected_image = LSC(image, [mesh_R, mesh_Gr, mesh_Gb, mesh_B])
+    # mesh_R, mesh_Gr, mesh_Gb, mesh_B= gainCorrection(corrected_image,[mesh_R, mesh_Gr, mesh_Gb, mesh_B])
+    # mesh_R=center_symmetric_avg(mesh_R)
+    # mesh_Gr=center_symmetric_avg(mesh_Gr)
+    # mesh_Gb=center_symmetric_avg(mesh_Gb)
+    # mesh_B=center_symmetric_avg(mesh_B)
     return [mesh_R, mesh_Gr, mesh_Gb, mesh_B]
 
 
@@ -362,35 +414,16 @@ def saveYaml_RGGB(result, basename):
         result: 包含校准结果的列表或数组
         basename: 输出文件的基本名称
     """
-    # 将 NumPy 数组转换为 Python 原生数据类型
-    def convert_numpy(obj):
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, (np.float32, np.float64)):
-            return float(obj)
-        elif isinstance(obj, (np.int32, np.int64)):
-            return int(obj)
-        return obj
     
     # 转换所有 NumPy 数组为列表
     converted_result = [convert_numpy(arr) for arr in result]
     
     # 准备元数据
-    calibration_data = {
-        'description': 'LSC (Lens Shading Correction) Calibration Results',
-        'type_list': ['R', 'Gr', 'Gb', 'B'],
-        'data': {
-            'R_channel': converted_result[0],  # R通道
-            'Gr_channel': converted_result[1],
-            'Gb_channel': converted_result[2],
-            'B_channel': converted_result[3]
-        },
-        'shape': {
-            'mesh_h_nums': 12,
-            'mesh_w_nums': 16,
-            'sample_size': 13
-        }
-    }
+    calibration_data = { }
+    
+    typeList= ['R','Gr','Gb','B']
+    for t, arr in zip(typeList, converted_result):
+            calibration_data[t]=arr
     
     # 保存为 YAML 文件
     with open(f'{basename}.yaml', 'w') as f:
@@ -504,7 +537,7 @@ def LSC(image, gainList):
     """
     向量化版本，显著提高速度
     """
-    Factor=0.85
+    strength=0.2
 
     mesh_R, mesh_Gr, mesh_Gb, mesh_B = gainList
     rows,cols  = image.shape[:2]
@@ -558,9 +591,11 @@ def LSC(image, gainList):
                           (1 - y_norm[mask]) * x_norm[mask] * q21 +
                           y_norm[mask] * (1 - x_norm[mask]) * q12 +
                           y_norm[mask] * x_norm[mask] * q22)
+        
+    gain_map=(gain_map-1)*strength+1
     
     # 应用增益
-    result = np.clip(image * gain_map*Factor, 0, 1023).astype(np.uint16)
+    result = np.clip(image * gain_map, 0, 1023).astype(np.float64)
     return result
 def AWB(image, awbParam):
     """
@@ -575,11 +610,11 @@ def AWB(image, awbParam):
     balanced = image.copy()
     
     # 矫正红色通道 (R位于偶数行偶数列)
-    balanced[::2, ::2] = np.clip(image[::2, ::2] * rGain, 0, 1023).astype(np.uint16)
-    balanced[::2, 1::2] = np.clip(image[::2, 1::2] * grGain, 0, 1023).astype(np.uint16)
-    balanced[1::2, ::2] = np.clip(image[::2, 1::2] * gbGain, 0, 1023).astype(np.uint16)
+    balanced[::2, ::2] = np.clip(image[::2, ::2] * rGain, 0, 1023).astype(np.float64)
+    balanced[::2, 1::2] = np.clip(image[::2, 1::2] * grGain, 0, 1023).astype(np.float64)
+    balanced[1::2, ::2] = np.clip(image[::2, 1::2] * gbGain, 0, 1023).astype(np.float64)
     # 矫正蓝色通道 (B位于奇数行奇数列)
-    balanced[1::2, 1::2] = np.clip(image[1::2, 1::2] * bGain, 0, 1023).astype(np.uint16)
+    balanced[1::2, 1::2] = np.clip(image[1::2, 1::2] * bGain, 0, 1023).astype(np.float64)
     
     return balanced
 def adjust_rgb_by_blocks_optimized(image: np.ndarray, gainList) -> np.ndarray:
@@ -700,7 +735,6 @@ def adjust_raw_by_blocks(image,gainList):
             
             # Horizontal normalized coordinate (0~1)
             u_norm = (x_pos - block_widths[j0]) / float(block_widths[j1] - block_widths[j0])
-            print(y_pos,x_pos)
             pixelType= get_bayer_color(y_pos, x_pos)
 
             match pixelType:
@@ -739,6 +773,87 @@ def printCornerValues_RGGB(array):
         rightBottom= arr[h-1, w-1]
         strTmp+=type_+":["+ f"{leftTop:.2f}, {rightTop:.2f}, {leftBottom:.2f}, {rightBottom:.2f}" +"]"
     print(f" {strTmp}")
+def generate_lut(m: int, n: int, c_strength: float =2.5 ):
+    """
+    Generate a lookup table for brightness adjustment.
+    
+    Args:adjust_brightness_by_blocks_in_yuv
+        m: Number of rows in block grid
+        n: Number of columns in block grid
+        c_strength: Corner strength parameter
+    
+    Returns:
+        2D list of gain values ((m+1) x (n+1))
+    """
+    m += 1
+    n += 1
+    lut = [[0.0 for _ in range(n)] for _ in range(m)]
+    
+    asymmetry = 1.0
+    f1 = c_strength - 1
+    f2 = 1 + np.sqrt(c_strength)
+    R2 = m * n / 4 * (1 + asymmetry * asymmetry)
+    
+    for y in range(n):
+        for x in range(m):
+            dy = y - n / 2 + 0.5
+            dx = (x - m / 2 + 0.5) * asymmetry
+            r2 = (dx * dx + dy * dy) / R2
+            lut[x][y] = (f1 * r2 + f2) ** 2 / (f2 * f2)  # reproduces the cos^4 rule
+    
+    return np.array(lut)
+def generater2(x,y,m=24,n=32):
+    asymmetry = 1.0
+  
+    R2 = m * n / 4 * (1 + asymmetry * asymmetry)
+    
+
+    dy = y - n / 2 + 0.5
+    dx = (x - m / 2 + 0.5) * asymmetry
+    r2 = (dx * dx + dy * dy) / R2
+    return r2
+def gainToCstrength(gain):
+
+    def loss (x,gain):
+        m,n=24,32
+        m += 1
+        n += 1
+        asymmetry = 1.0
+        f1 = x - 1
+        f2 = 1 + np.sqrt(x)
+        R2 = m * n / 4 * (1 + asymmetry * asymmetry)
+
+        dy = 0 - n / 2 + 0.5
+        dx = (0 - m / 2 + 0.5) * asymmetry
+        r2 = (dx * dx + dy * dy) / R2
+        newGain = (f1 * r2 + f2) ** 2 / (f2 * f2)  # reproduces the cos^4 rule
+        
+        return np.sqrt((newGain - gain) ** 2)
+    x=1
+    bounds = [(1, None)]  # 设置x的范围
+    result = minimize(
+            loss,  # 包装loss函数
+            x,  
+            args=(gain),
+            # constraints=constraints,
+            bounds=bounds,
+            method='BFGS',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
+            options={'maxiter': 10000,'rhobeg': 1.0, 'rhoend': 1e-12,'disp': True}
+        )
+    print(f"最小化结果: {result.x}")
+    return result.x[0]  # 返回最小化后的x值，即c_strength
+def gainListToCsrength(gainList):
+    CstrengthList=[]
+
+    for gain in gainList:
+        leftTop= gain[0, 0]
+        rightTop= gain[0, -1]
+        leftBottom= gain[-1, 0]
+        rightBottom= gain[-1, -1]
+        avgGain= (leftTop+rightTop+leftBottom+rightBottom)/4       
+        Cstrength=gainToCstrength(avgGain)
+        CstrengthList.append(Cstrength)
+    return CstrengthList
 def lenShadingCalibration(image_folder):
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
     for path,basename in zip(full_paths,basenames):
@@ -747,9 +862,9 @@ def lenShadingCalibration(image_folder):
         if pgm_image is not None:
             print(f"图像尺寸: {pgm_image.shape},数据类型: {pgm_image.dtype},最小值: {pgm_image.min()}, 最大值: {pgm_image.max()}")  # (高度, 宽度)
             resultList=[]
-            for s in range(7,15,2):
-                resultTmp = lsc_calib(pgm_image, mesh_h_nums=12, mesh_w_nums=16, sample_size=s,maxFactor=1.0)
-                print('当前采样点数:',s)
+            for s in range(5,7,2):
+                resultTmp = lsc_calib(pgm_image, mesh_h_nums=24, mesh_w_nums=32, sample_size=s,maxFactor=1.0)
+
                 printCornerValues_RGGB(resultTmp)
                 resultList.append(resultTmp)
             stacked = np.stack(resultList)  
@@ -809,41 +924,51 @@ def writePgm(image, basename):
 
 def Demosaic(bayer_pgm):
     # 常见选项：COLOR_BAYER_BG2RGB, COLOR_BAYER_RG2RGB, COLOR_BAYER_GB2RGB 等
+    bayer_pgm= bayer_pgm.astype(np.uint16)  # 确保数据类型为 uint16
     rgb = cv2.cvtColor(bayer_pgm, cv2.COLOR_BAYER_RGGB2RGB)
     return rgb
-
+def center_symmetric_avg(matrix):
+    return (matrix + np.flip(matrix, axis=0)+np.flip(matrix, axis=1)+np.flip(matrix)) / 4
+def center_symmetric_avg_MIN(matrix):
+    return np.minimum(matrix, np.flip(matrix))  
 def lenShadingCorrection(image_folder):
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
-    AWBList=loadYaml(r'C:\serialPortVisualization\AWBResultsLSC.yaml')
+    AWBList=loadYaml(r'C:\WorkSpace\serialPortVisualization\AWBResults.yaml')
     for path,basename in zip(full_paths,basenames):
         print(f"Processing image: {path}...")   
         keyCT= getCTstr(path)
         
-        yaml_file = fr'C:\serialPortVisualization\data\0815_1_Config\isp_sensor_raw{keyCT}.yaml'
+        # yaml_file = fr'C:\serialPortVisualization\data\0815_1_Config\isp_sensor_raw{keyCT}.yaml'
+        yaml_file = fr'C:\WorkSpace\serialPortVisualization\data\0821_Yaml\isp_sensor_raw{keyCT}.yaml'
         dataYaml = loadYaml(yaml_file)
         gainList=[]
-        for key,value in dataYaml.items():
-            # print(f"{key}: {value}")
-            if key=='data':
-                mesh_R = np.array(value['R_channel'])
-                mesh_Gr = np.array(value['Gr_channel'])
-                mesh_Gb = np.array(value['Gb_channel'])
-                mesh_B = np.array(value['B_channel'])
-                gainList.append(mesh_R)
-                gainList.append(mesh_Gr)
-                gainList.append(mesh_Gb)
-                gainList.append(mesh_B)
+        
+        mesh_R = np.array(dataYaml['R'])
+        mesh_Gr = np.array(dataYaml['Gr'])
+        mesh_Gb = np.array(dataYaml['Gb'])
+        mesh_B = np.array(dataYaml['B'])
+
+        mesh_R=center_symmetric_avg(mesh_R)
+        mesh_Gr=center_symmetric_avg(mesh_Gr)
+        mesh_Gb=center_symmetric_avg(mesh_Gb)
+        mesh_B=center_symmetric_avg(mesh_B)
+        # mesh_Gr= (mesh_Gr + mesh_Gb) / 2  
+        # mesh_Gb= mesh_Gr.copy()  
+        gainList.append(mesh_R)
+        gainList.append(mesh_Gr)
+        gainList.append(mesh_Gb)
+        gainList.append(mesh_B)
    
         img = read_pgm_with_opencv(path)
         # awbList={'H':(1.793,0.825),'A':(1.750,0.923),'U30':(1.85,1.031),'CWF':(1.619,1.280),'D50':(1.393,1.312),'D60':(1.311,1.385)}
         # awbList={'H':(1.818,0.863),'U30':(1.897,1.031),'CWF':(1.619,1.280),'D50':(1.406,1.321)}
         awbParam=AWBList[keyCT]
-        # img=LSC(img,gainList)
-        imgLSCTmp= img.copy()
+        img=LSC(img,gainList)
+        
         img= AWB(img,awbParam)  # 假设红蓝通道增益为1.0
+        imgLSCTmp= img.copy()
 
         img=Demosaic(img)
-
         img = img/1023 * 255  # 将16位数据转换为8位
         img = img.astype(np.uint8)
         cv2.imwrite(f'{basename}_LSC_AWB.jpg', img)
@@ -978,7 +1103,15 @@ def image_Concatenated(image_folder):
     imgW=img0.shape[1]
     imgH=img0.shape[0]
     n=len(full_paths)
-    imgConcatenated = np.zeros((imgH, imgW*n, 3), dtype=np.uint8)
+    nH=1
+
+    while nH < n:
+        if n / nH > 3:
+            nH += 1
+        else:
+            break
+    nW=(n // nH)
+    imgConcatenated = np.zeros((imgH*nH, imgW*nW, 3), dtype=np.uint8)
     x_offset = 0
 
     keyWordList=['H_','A_','U30','CWF','D50','D60']
@@ -989,19 +1122,56 @@ def image_Concatenated(image_folder):
         return float('inf')  # 没匹配到的放在最后
     full_paths = sorted(full_paths, key=get_priority)
     print("Sorted paths based on priority:", full_paths)
-    for path,basename in zip(full_paths,basenames):
+    for i,(path,basename) in enumerate(zip(full_paths,basenames)):
         img= cv2.imread(path, cv2.IMREAD_UNCHANGED)
-        imgConcatenated[0:imgH, x_offset:x_offset+imgW] = img
-        x_offset += imgW
+        nwi= i % nW
+        nhi= i // nW
+        imgConcatenated[nhi*imgH:imgH*(nhi+1), nwi*imgW:(nwi+1)*imgW] = img
     cv2.imwrite('ConcatenatedImage.jpg', imgConcatenated)
-
+def image_Concatenated_Matrix(imageList,grid=(2, 3)):
+    """
+    Concatenate images into a grid.
+    
+    Args:
+        imageList: List of images to concatenate
+        grid: Tuple (rows, cols) specifying the grid size
+    
+    Returns:
+        Concatenated image
+    """
+    rows, cols = grid
+    if len(imageList) > rows * cols:
+        raise ValueError("Image list length does not match grid size")
+    img0= cv2.imread(imageList[0], cv2.IMREAD_UNCHANGED)
+    imgH, imgW = img0.shape[:2]
+    concatenated_image = np.zeros((imgH * rows, imgW * cols, 3), dtype=np.uint8)
+    idx=0
+    for i in range(rows):
+        for j in range(cols):
+            img =  cv2.imread(imageList[idx], cv2.IMREAD_UNCHANGED)
+            concatenated_image[i * imgH:(i + 1) * imgH, j * imgW:(j + 1) * imgW] = img
+            idx += 1
+    cv2.imwrite('ConcatenatedImage_Matrix.jpg', concatenated_image)
+    print(f"Concatenated image saved as 'ConcatenatedImage_Matrix.jpg!")
+def loadYamlVisualization(folder_path):
+    full_paths, basenames = get_paths(folder_path, suffix=".yaml")
+    for path,basename in zip(full_paths,basenames):
+        print(f"Processing YAML file: {path}...")
+        # 加载YAML文件
+        data = loadYaml(path)
+        # 可视化增益网格
+        data['R'] = np.array(data['R'])
+        data['Gr'] = np.array(data['Gr'])
+        data['Gb'] = np.array(data['Gb'])
+        data['B'] = np.array(data['B'])
+        visualize_2d_array_multi([data['R'],data['Gr'],data['Gb'],data['B']], f"{basename}")
 def main():
 
     """"=============================标定代码============================="""
-    # folder_path= r'C:\serialPortVisualization\data\0819_1_LSC'
+    # folder_path= r'C:\WorkSpace\serialPortVisualization\data\0819_1'
     # lenShadingCalibration(folder_path)
     """"=============================应用代码============================="""
-    folder_path=r'C:\serialPortVisualization\data\0819_1' 
+    folder_path=r'C:\WorkSpace\serialPortVisualization\data\0819_1_LSC'
     lenShadingCorrection(folder_path)
 
     """=====================================pngLSC====================================="""
@@ -1011,15 +1181,27 @@ def main():
     ''''=====================png标定========================'''
     # folder_path=r'C:\serialPortVisualization\data\0812_1_Calib'
     # lenShadingCalibrationFor_Png(folder_path)
-    '''=====================pgm转raw========================'''
 
     """===============AWB标定=================="""
     # folder_path=r'C:\serialPortVisualization\data\0819_1AWBnewCalib'
     # folderPocessingAWB(folder_path)
 
     ''' =================合成图像=================='''
-    # folder_path=r'C:\serialPortVisualization\data\0819_5'
+    # folder_path=r'C:\WorkSpace\serialPortVisualization\data\0821_1'
     # image_Concatenated(folder_path)
+    ''' =================合成图像2================='''
+    # folder_path=[
+    #     r'C:\WorkSpace\serialPortVisualization\ConcatenatedImage_Matrix1.jpg',
+    #     r'C:\WorkSpace\serialPortVisualization\ConcatenatedImage_Matrix2.jpg',
+    #     r'C:\WorkSpace\serialPortVisualization\ConcatenatedImage_Matrix3.jpg',
+    #     r'C:\WorkSpace\serialPortVisualization\ConcatenatedImage_Matrix4.jpg',
+    #     r'C:\WorkSpace\serialPortVisualization\ConcatenatedImage_Matrix5.jpg',
+       
+    # ]
+    # image_Concatenated_Matrix(folder_path,grid=(1, 5))
+    '''=====================yaml可视化========================'''
+    # folder_path= r'C:\WorkSpace\serialPortVisualization\data\0821_1'
+    # loadYamlVisualization(folder_path)
 
     
 

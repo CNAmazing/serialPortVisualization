@@ -3,6 +3,7 @@ from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import inspect
+from tools import *
 mpl.rcParams['font.family'] = 'Microsoft YaHei'
 
 # 指数衰减函数: a * e^(-k*x) + c
@@ -34,6 +35,8 @@ def func_sqrt(x, a, b):
 def func_1_x(x, a, b, c):
     return a / (x + b) + c
 
+def func_1_r2_r4(x, a, b,c ):
+    return 1+ a * x + b * x**3+c* x**4
 
 def curveFit(data,func):
     # 获取函数的参数信息
@@ -69,7 +72,7 @@ def curveFit(data,func):
     plt.scatter(x, y, label="原始数据")
     plt.plot(x, y_fit, 'r-', label="拟合曲线")
     plt.legend()
-    plt.show()
+    # plt.show()
     param_str = ", ".join([f"{name}={value}" for name, value in param_values.items()])
     paramError_str = ", ".join([f"{name}误差={error}" for name, error in zip(fit_param_names, param_errors)])
     print(f"拟合参数: {param_str}")
@@ -80,13 +83,51 @@ def regularizeData(X):
         x=int(x//1000)
         x=x*1000
     return X
+def generater2(x,y,m=24,n=32):
+    asymmetry = 1.0
+  
+    R2 = m * n / 4 * (1 + asymmetry * asymmetry)
+    
+
+    dy = y - n / 2 + 0.5
+    dx = (x - m / 2 + 0.5) * asymmetry
+    r2 = (dx * dx + dy * dy) / R2
+    return r2
+def generate_lut(m: int, n: int,  ):
+    """
+    Generate a lookup table for brightness adjustment.
+    
+    Args:adjust_brightness_by_blocks_in_yuv
+        m: Number of rows in block grid
+        n: Number of columns in block grid
+        c_strength: Corner strength parameter
+    
+    Returns:
+        2D list of gain values ((m+1) x (n+1))
+    """
+    m += 1
+    n += 1
+    lut = [[0.0 for _ in range(n)] for _ in range(m)]
+    
+    asymmetry = 1.0
+
+    R2 = m * n / 4 * (1 + asymmetry * asymmetry)
+    
+    for y in range(n):
+        for x in range(m):
+            dy = y - n / 2 + 0.5
+            dx = (x - m / 2 + 0.5) * asymmetry
+            r2 = (dx * dx + dy * dy) / R2
+            lut[x][y] = r2 # reproduces the cos^4 rule
+    
+    return np.array(lut)
 def valueCal(x, *params,func):
 
     y= func(x, *params)
     
     plt.scatter(x, y, label="拟合数据")
     for x_i, y_i in zip(x,y):
-        plt.text(x_i, y_i, f"{x_i,int(y_i)}", ha='center', va='bottom')
+        plt.text(x_i, y_i, f"{x_i,(y_i)}", ha='center', va='bottom')
      # 打印每个点的坐标  
     plt.plot(x, y, 'r-', )
     print(f"x: {x.tolist()}")  # 打印每个点的坐标  
@@ -95,82 +136,47 @@ def valueCal(x, *params,func):
     print(f"y: {y.astype(int).tolist()}") 
     plt.legend()
     plt.show()
+def processLSC(folderPath):
+    """处理LSC数据"""
+    full_paths, basenames = get_paths(folderPath, suffix=".yaml")
+    for path, basename in zip(full_paths, basenames):
+        print(f'Processing: {path}...')
+        data = loadYaml(path)
+        result = {}
+        typeChannel = ['R', 'Gr', 'Gb', 'B']
+        for t in typeChannel:
+            dataLut= data[t]
+        
+            m = len(dataLut) 
+            n = len(dataLut[0]) 
+            xIdx = generate_lut(m-1, n-1)
+            dataLut = np.array(dataLut)
 
+            dataLut = dataLut.flatten()
+            xIdx = xIdx.flatten()
+            dataLut = np.column_stack((xIdx, dataLut))
+            
+            params = curveFit(dataLut, func=func_1_r2_r4)
+            
+            lut = np.zeros((m , n ))
+            for j in range(n ):
+                for i in range(m ):
+                    lut[i][j] = func_1_r2_r4(generater2(i, j, m, n), *params)
+            result[t]= convert_numpy(lut)
+        saveYaml(result, basename)
+        
 def main():
-    data=np.array([
-                  [7.4,9700],
-                  [11.2,4000],
-                  [15,3000],
-                  [18.4,2500],
-                  [23.6,2000],
-                  [13.9,5000],
-                  [9.8,6000],
-                  [11.3,5000],
-                  [10,6000],
-                  [9,6000],
-                  [0,62000],
-                  [1,56000],
-                  [2,38000],
-                  [2.5,34000],
-                  [1.9,44000],
-                  [1.8,50000],
-                  [2.8,26000],
-                  [4.1,16000],
-                  [6,11000],
-                  [10.2,6000],
-                  [6.7,8000],
-                  [9,6000],
-                  [6.9,9000],
-                  [14.5,4200],
-                  [13,4700],
-                  [56,1000]
-                
-              
-                  ])
-
-    data_outdoor=np.array([
-                [92.3,9200],
-                [73.1,16400],
-                [85.4,10000],
-                [78.7,13600],
-                [56,20000],
-                [85.4,10500],
-                [71.4,16700],
-                [86,9800],
-                [78.5,13800],
-                [130,1000],
-                [94,5000],
-                [80.5,6700],
-                [89,6300],
-                [91.4,6000],
-                [74,11000],
-                [75.3,11500],
-                [80,9500]
-                ])
-
-
-    data_fix=np.array([
-                [3375,2800],
-                [3275,2800],
-                [3800,3800],
-                [3800,3800],
-                [4150,4150],
-                [4150,4150],
-                [5300,6500],
-                [5350,6500],
-                
-    ])
-    params=curveFit(data_fix,func=func_quad)
-
+    folderPath = r"C:\WorkSpace\serialPortVisualization\data\0821_Yaml"
+    processLSC(folderPath)   
     """"
     计算给定x值的拟合曲线y值
     """
-    x=[]
-    for i in range(2500,6500,500):
-        x.append(i)
-    x=np.array(x)
-    # a, b, c = 36984.00,0.41,3431.71
-    valueCal(x,*params,func=func_quad)
+    # x=[]
+    # for i in range(0,10,1):
+    #     x.append(i/10)
+    # x=np.array(x)
+    # # a, b, c = 36984.00,0.41,3431.71
+    # valueCal(x,*params,func=func_1_r2_r4)
 
 main()
 
