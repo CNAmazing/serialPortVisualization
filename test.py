@@ -2,7 +2,7 @@ import cv2
 import matplotlib.pyplot as plt
 
 # 1. 读取一张图像
-image = cv2.imread(r'C:\WorkSpace\serialPortVisualization\data\0827_ColorChecker\demosaicResults\isp_sensor_rawU30.jpg')
+image = cv2.imread(r'C:\Users\admin\Pictures\Quicker_20250622_165325.png')
 
 # 将BGR格式转换为RGB格式（Matplotlib使用RGB）
 image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -14,6 +14,7 @@ interval = 160
 # 起始坐标（第一个方块的左上角）
 start_x = 400
 start_y = 481
+
 boxList=[]
 # 3. 循环生成24个等距离的矩形（6行4列）
 for idx in range(24):

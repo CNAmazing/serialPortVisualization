@@ -185,7 +185,7 @@ def rgb_to_lab(rgb):
 def Demosaic(bayer_pgm):
     # 常见选项：COLOR_BAYER_BG2RGB, COLOR_BAYER_RG2RGB, COLOR_BAYER_GB2RGB 等
     bayer_pgm= bayer_pgm.astype(np.uint16)  # 确保数据类型为 uint16
-    rgb = cv2.cvtColor(bayer_pgm, cv2.COLOR_BAYER_RGGB2RGB)
+    rgb = cv2.cvtColor(bayer_pgm, cv2.COLOR_BAYER_BGGR2RGB)
     return rgb
 def BLC(img,blcParam=16):
     img= img - blcParam 
@@ -228,7 +228,6 @@ class CCM_3x3:
         # sumTmp[18]*=3
         # sumTmp[19]*=3
         sumTmp=np.sum((predicted - output)**2,axis=0)
-        
 
         error = np.mean(sumTmp)  # MSE误差
         # print(f"error:{error}")
@@ -469,11 +468,31 @@ def calColor(img,area):
         mean_color = [Rmean, Gmean, Bmean]
         avg_colors.append(mean_color)
     return np.array(avg_colors)  # 返回一个包含所有色块平均颜色的数组
+def calColorError(img,area):
+    """计算色块的平均RGB值"""
+    avg_colors = []
+    for (x1, y1, x2, y2) in area:
+        patch = img[y1:y2, x1:x2]
+        # mean_color = cv2.mean(patch)[:3]  # 计算BGR的均值，忽略Alpha通道
+        Rmean= np.mean(patch[:,:,0])
+        Gmean= np.mean(patch[:,:,1])
+        Bmean= np.mean(patch[:,:,2])
+        mean_color = [Rmean, Gmean, Bmean]
+        avg_colors.append(mean_color)
+    avg_colors= np.array(avg_colors)  # 返回一个包含所有色块平均颜色的数组
+    labPredicted= rgb_to_lab(avg_colors)  # 转换为Lab颜色空间
+    labOutput = rgb_to_lab(IDEAL_LINEAR_RGB)  # 转换为Lab颜色空间
+    labPredicted=labPredicted.T
+    labOutput=labOutput.T
+    sumTmp=np.sqrt(np.sum((labPredicted - labOutput)**2,axis=0))
+    error = np.mean(sumTmp)  # MSE误差
+    # error=np.sqrt(np.sum((avg_colors - IDEAL_LINEAR_RGB)**2,axis=1))
+    return error
 def autoFitLsc(image_folder):
 
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
-    Rrange= np.arange(1.55, 1.9, 0.03)  # 红色通道增益范围
-    Brange= np.arange(0.75, 1.08, 0.03)  
+    Rrange= np.arange(1.6, 1.9, 0.04)  # 红色通道增益范围
+    Brange= np.arange(0.8, 1.1, 0.04)  
     Grange= np.arange(0.85, 1.05, 0.03)  
     yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0826_LSC_low'
     area=[[400, 481, 550, 631], [710, 481, 860, 631], [1020, 481, 1170, 631], [1330, 481, 1480, 631], [1640, 481, 1790, 631], [1950, 481, 2100, 631], [400, 791, 550, 941], [710, 791, 860, 941], [1020, 791, 1170, 941], [1330, 791, 1480, 941], [1640, 791, 1790, 941], [1950, 791, 2100, 941], [400, 1101, 550, 1251], [710, 1101, 860, 1251], [1020, 1101, 1170, 1251], [1330, 1101, 1480, 1251], [1640, 1101, 1790, 1251], [1950, 1101, 2100, 1251], [400, 1411, 550, 1561], [710, 1411, 860, 1561], [1020, 1411, 1170, 1561], [1330, 1411, 1480, 1561], [1640, 1411, 1790, 1561], [1950, 1411, 2100, 1561]]
@@ -481,49 +500,53 @@ def autoFitLsc(image_folder):
         keyCT= getCTstr(path)
        
         print(f"Processing image: {path},colorTemp:{keyCT}...")   
-        if keyCT !='U30':
+        if keyCT !='A':
             continue
         # yaml_file = fr'C:\serialPortVisualization\data\0815_1_Config\isp_sensor_raw{keyCT}.yaml'
         yaml_file = ''
-        yaml_files,_= get_paths(yamlFolder,suffix=".yaml")
-        for yf in yaml_files:
-            if keyCT in yf:
-                yaml_file=yf
-                break
-        if yaml_file == '':
-            print(f"未找到对应的yaml文件，跳过处理: {keyCT}")
-            continue
-        print(f"Using yaml file: {yaml_file}...")
-        dataYaml = loadYaml(yaml_file)
-        gainList=[]
+        # yaml_files,_= get_paths(yamlFolder,suffix=".yaml")
+        # for yf in yaml_files:
+        #     if keyCT in yf:
+        #         yaml_file=yf
+        #         break
+        # if yaml_file == '':
+        #     print(f"未找到对应的yaml文件，跳过处理: {keyCT}")
+        #     continue
+        # print(f"Using yaml file: {yaml_file}...")
+        # dataYaml = loadYaml(yaml_file)
+        # gainList=[]
         
-        mesh_R = np.array(dataYaml['R'])
-        mesh_Gr = np.array(dataYaml['Gr'])
-        mesh_Gb = np.array(dataYaml['Gb'])
-        mesh_B = np.array(dataYaml['B'])
+        # mesh_R = np.array(dataYaml['R'])
+        # mesh_Gr = np.array(dataYaml['Gr'])
+        # mesh_Gb = np.array(dataYaml['Gb'])
+        # mesh_B = np.array(dataYaml['B'])
 
 
-        gainList.append(mesh_R)
-        gainList.append(mesh_Gr)
-        gainList.append(mesh_Gb)
-        gainList.append(mesh_B)
+        # gainList.append(mesh_R)
+        # gainList.append(mesh_Gr)
+        # gainList.append(mesh_Gb)
+        # gainList.append(mesh_B)
    
         img = read_pgm_with_opencv(path)
         print(f"图像尺寸: {img.shape},数据类型: {img.dtype},最小值: {img.min()}, 最大值: {img.max()},均值_10bit:{img.mean()},均值_8bit:{img.mean()/1023*255}")  # (高度, 宽度)
-        img= BLC(img,blcParam=16)
-        imgLSC=LSC(img,gainList,strength=[0.5,0.5,0.5,0.5])
-
+        imgLSC= BLC(img,blcParam=16)
+        # imgLSC=LSC(img,gainList,strength=[0.5,0.5,0.5,0.5])
+        minError=float('inf')
+        bestParam=None
+        bestCCM=None
         for rGain in Rrange:
             for bGain in Brange:
                     awbParam=[rGain,1,1,bGain]
                     print(f"尝试awb参数: {awbParam}...")
                     # awbParam=AWBList[keyCT]
+                    print(imgLSC[0:4,0:4])
+
                     imgTmp= AWB(imgLSC,awbParam)  # 假设红蓝通道增益为1.0
                     imgTmp=np.clip(imgTmp,0,1023)
                     imgTmp=Demosaic(imgTmp)
                     imgTmp = imgTmp/1023 # 归一化
                     print(f"去马赛克后图像尺寸: {imgTmp.shape},数据类型: {imgTmp.dtype},最小值: {imgTmp.min()}, 最大值: {imgTmp.max()},均值_8bit:{imgTmp.mean()/1023*255}")  # (高度, 宽度)
-                    imgTmp=imgTmp[...,::-1] # BGR转RGB
+                    # imgTmp=imgTmp[...,::-1] # BGR转RGB
 
                     color_means= calColor(imgTmp,area)
                     print(f"计算的色块平均RGB值: {color_means}...")
@@ -532,19 +555,23 @@ def autoFitLsc(image_folder):
                     ccm= ccmCalib.infer_image()
                     # imgTmp= ccmApply_3x4(imgTmp,ccm)
                     imgTmp= ccmApply(imgTmp,ccm)
+                    error=calColorError(imgTmp,area)
+                    if error < minError:
+                        minError=error
+                        bestParam=awbParam
+                        bestCCM=ccm
                     imgTmp= Gamma(imgTmp)
-                    imgTmp=imgTmp[...,::-1] # BGR转RGB
-
+                    imgTmp=imgTmp[...,::-1] # RGB转BGR
+                    
+                    print(f"色彩误差: {error}...")
                     imgTmp = np.clip(imgTmp * 255, 0, 255)
                     imgTmp = imgTmp.astype(np.uint8)
-                    savePath=os.path.join(image_folder,'demosaicResults')
+                    savePath=os.path.join(image_folder,'ispResults')
                     os.makedirs(savePath, exist_ok=True)
                     imgSavePath=os.path.join(savePath, f"{basename}_R{rGain:.2f}_B{bGain:.2f}.jpg")
                     cv2.imwrite(imgSavePath, imgTmp)
                     # writePgm(imgLSCTmp, basename)  
-            
-
-
+        print(f"最佳awb参数: {bestParam}, 最小色彩误差: {minError},最佳CCM:\n{npToString(bestCCM)}")    
 def main():
     if len(sys.argv) != 2:
         print("Usage: python rawLsc.py <folder_path>")
