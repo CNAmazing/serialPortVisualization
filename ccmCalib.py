@@ -67,12 +67,12 @@ def readCSV(file_path):
         
         # 获取第3行第2列(索引从0开始)
         colorArr=[]
-        startRow=10
+        startRow=58
         for i in range(24):
             rowIdx= startRow + i
-            R = float(rows[rowIdx][4])/255.0
-            G = float(rows[rowIdx][5])/255.0
-            B = float(rows[rowIdx][6])/255.0
+            R = float(rows[rowIdx][1])
+            G = float(rows[rowIdx][2])
+            B = float(rows[rowIdx][3])
             colorArr.append([float(R), float(G), float(B)])
         print(colorArr)
         return np.array(colorArr, dtype=np.float64)
@@ -122,17 +122,16 @@ class CCM_3x3:
         ccm = x.reshape(3, 3)  # 将扁平化的参数恢复为3x3矩阵
         predicted = np.dot(ccm,input)  # 应用颜色校正
 
-        labPredicted= rgb_to_lab(predicted.T)  # 转换为Lab颜色空间
-        labOutput = rgb_to_lab(output.T)  # 转换为Lab颜色空间
-        labPredicted=labPredicted.T
-        labOutput=labOutput.T
-        sumTmp=np.sqrt(np.sum((labPredicted - labOutput)**2,axis=0))
+        # labPredicted= rgb_to_lab(predicted.T)  # 转换为Lab颜色空间
+        # labOutput = rgb_to_lab(output.T)  # 转换为Lab颜色空间
+        # labPredicted=labPredicted.T
+        # labOutput=labOutput.T
+        # sumTmp=np.sum((labPredicted - labOutput)**2,axis=0)
         # sumTmp[18]*=3
         # sumTmp[19]*=3
-        # sumTmp[20]*=3
-        # sumTmp[21]*=3
-        # sumTmp=np.sqrt(np.sum((predicted - output)**2,axis=0))
-      
+        sumTmp=np.sum((predicted - output)**2,axis=0)
+        
+
         error = np.mean(sumTmp)  # MSE误差
         # print(f"error:{error}")
         # return((labPredicted - labOutput)**2).flatten()
@@ -295,7 +294,7 @@ def ccmInfer(csv_path):
 
     # ccmCalib= CCM_3x4(input_arr, IDEAL_LINEAR_RGB)
     # ccmCalib= CCM_3x4(input_arr, IDEAL_RGB)
-    ccmCalib= CCM_3x3(input_arr, IDEAL_LINEAR_RGB)
+    ccmCalib= CCM_3x3(input_arr, IDEAL_LINEAR_RGB) 
     ccm= ccmCalib.infer_image()
     return ccm
 
@@ -377,7 +376,7 @@ def folder_to_csv(folder_path):
     
 def main():
         
-    folder_path= r'C:\WorkSpace\serialPortVisualization\data\0822_1'
+    folder_path= r'C:\WorkSpace\serialPortVisualization\data\0827_ColorChecker'
     folder_to_csv(folder_path)
 
    

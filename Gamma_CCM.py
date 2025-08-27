@@ -18,7 +18,6 @@ def Gamma(img):
     srgb[mask] = img[mask] * 12.92
     srgb[~mask] = 1.055 * (img[~mask] ** (1/2.4)) - 0.055
     return srgb
-    return img**(1/2.2)
 
     # gamma = 2.2
     # img_gamma = np.power(img.astype(np.float64) , gamma)
@@ -129,19 +128,22 @@ def main():
         print(f'Processing: {path}, Type: {typeCT}')
 
         # print   (yamlData['D50'])
-        CCM= np.array(yamlData[typeCT])
-        print(npToString(CCM))
+        # CCM= np.array(yamlData[typeCT])
+        # print(npToString(CCM))
         img= cv2.imread(path)
+        print (f"Original image shape: {img.shape}, dtype: {img.dtype}")
+        print("img min/max before processing:", img.min(), img.max())
         img=img_uint8_to_float(img)
-
         # img= ccmApply_3x4(img,CCM)
-        img= ccmApply(img,CCM)
-        img= Gamma(img) #img_Gamma  范围0-1
+        # img= ccmApply(img,CCM)
+
+        # img= Gamma(img) #img_Gamma  范围0-1
+        img= reverseGamma(img) #img_Gamma  范围0-1
 
         img = np.clip(img, 0, 1) #img_CCM  范围0-1
 
         # img= Contrast(img)
-        #
+        
         img = (img * 255).astype(np.uint8) #img_CCM  范围0-1 
         img = np.clip(img, 0, 255)
 
@@ -152,5 +154,6 @@ def main():
             os.makedirs(savePath)
         imgSavePath=os.path.join(savePath,imgName)
         cv2.imwrite(imgSavePath, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        print(f"Saved processed image to: {imgSavePath}")
 
 main()

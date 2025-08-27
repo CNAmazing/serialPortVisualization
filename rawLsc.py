@@ -1036,15 +1036,81 @@ def DemosaicBayer(bayer_array: np.ndarray, pattern: str = 'RGGB') -> np.ndarray:
                     rgb[i, j, 1] = sum(neighbors) // len(neighbors)
     
     return rgb
-def lenShadingCorrection(image_folder):
+def awbSearch(image_folder):
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
-    AWBList=loadYaml(r'C:\WorkSpace\serialPortVisualization\config\AWBResultsCopy.yaml')
-    yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0826_LSC_NEw'
+    Rrange= np.arange(1.6, 2, 0.02)  # 红色通道增益范围
+    Brange= np.arange(0.8, 1.1, 0.02)  # 绿色通道增益范围
+
+    yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0826_LSC_mid'
     
     for path,basename in zip(full_paths,basenames):
         keyCT= getCTstr(path)
+       
         print(f"Processing image: {path},colorTemp:{keyCT}...")   
+        if keyCT !='A':
+            continue
+        # yaml_file = fr'C:\serialPortVisualization\data\0815_1_Config\isp_sensor_raw{keyCT}.yaml'
+        yaml_file = ''
+        yaml_files,_= get_paths(yamlFolder,suffix=".yaml")
+        for yf in yaml_files:
+            if keyCT in yf:
+                yaml_file=yf
+                break
+        if yaml_file == '':
+            print(f"未找到对应的yaml文件，跳过处理: {keyCT}")
+            continue
+        print(f"Using yaml file: {yaml_file}...")
+        dataYaml = loadYaml(yaml_file)
+        gainList=[]
         
+        mesh_R = np.array(dataYaml['R'])
+        mesh_Gr = np.array(dataYaml['Gr'])
+        mesh_Gb = np.array(dataYaml['Gb'])
+        mesh_B = np.array(dataYaml['B'])
+
+
+        gainList.append(mesh_R)
+        gainList.append(mesh_Gr)
+        gainList.append(mesh_Gb)
+        gainList.append(mesh_B)
+   
+        img = read_pgm_with_opencv(path)
+        print(f"图像尺寸: {img.shape},数据类型: {img.dtype},最小值: {img.min()}, 最大值: {img.max()},均值_10bit:{img.mean()},均值_8bit:{img.mean()/1023*255}")  # (高度, 宽度)
+        img= BLC(img,blcParam=16)
+        imgLSC=LSC(img,gainList,strength=[1,1,1,1])
+
+        for rGain in Rrange:
+            for bGain in Brange:
+                awbParam=[rGain,1,1,bGain]
+                print(f"尝试awb参数: {awbParam}...")
+                # awbParam=AWBList[keyCT]
+                strengthList=[]
+                # img=LSC(img,gainList,strength=[0.908,0.942,0.942,0.916])
+                # img=LSC(img,gainList,strength=[0.707,0.783,0.822,0.77])
+
+
+                img= AWB(imgLSC,awbParam)  # 假设红蓝通道增益为1.0
+
+                img=Demosaic(img)
+                img = img/1023 * 255  # 将16位数据转换为8位
+                img = img.astype(np.uint8)
+                savePath=os.path.join(image_folder,'demosaicResults')
+                os.makedirs(savePath, exist_ok=True)
+                imgSavePath=os.path.join(savePath, f"{basename}_R{rGain:.2f}_B{bGain:.2f}.jpg")
+                cv2.imwrite(imgSavePath, img)
+                # writePgm(imgLSCTmp, basename)  
+        
+def lenShadingCorrection(image_folder):
+    full_paths, basenames = get_paths(image_folder,suffix=".pgm")
+    AWBList=loadYaml(r'C:\WorkSpace\serialPortVisualization\config\AWBResultsCopy.yaml')
+    yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0826_LSC_mid'
+    
+    for path,basename in zip(full_paths,basenames):
+        keyCT= getCTstr(path)
+       
+        print(f"Processing image: {path},colorTemp:{keyCT}...")   
+        if keyCT !='U30':
+            continue
         # yaml_file = fr'C:\serialPortVisualization\data\0815_1_Config\isp_sensor_raw{keyCT}.yaml'
         yaml_file = ''
         yaml_files,_= get_paths(yamlFolder,suffix=".yaml")
@@ -1075,16 +1141,15 @@ def lenShadingCorrection(image_folder):
         img= BLC(img,blcParam=16)
         awbParam=AWBList[keyCT]
         strengthList=[]
-        img=LSC(img,gainList,strength=[0.908,0.942,0.942,0.916])
+        # img=LSC(img,gainList,strength=[0.908,0.942,0.942,0.916])
         # img=LSC(img,gainList,strength=[0.707,0.783,0.822,0.77])
 
-        # img=LSC(img,gainList,strength=[1,1,1,1])
+        img=LSC(img,gainList,strength=[1,1,1,1])
 
         img= AWB(img,awbParam)  # 假设红蓝通道增益为1.0
         imgLSCTmp= img.copy()
 
-        # img=Demosaic(img)
-        img=DemosaicBayer(img)
+        img=Demosaic(img)
         img = img/1023 * 255  # 将16位数据转换为8位
         img = img.astype(np.uint8)
         savePath=os.path.join(image_folder,'demosaicResults')
@@ -1336,7 +1401,8 @@ def main():
     # lenShadingCalibration(folder_path)
     """"=============================应用代码============================="""
     # lenShadingCorrection(folderPath)
-    lenShadingCorrection(folderPath)
+    # lenShadingCorrection(folderPath)
+    # awbSearch(folderPath)
 
     """=====================================pngLSC====================================="""
     # folder_path=r'C:\serialPortVisualization\data\0812_1'
@@ -1356,14 +1422,16 @@ def main():
     # image_Concatenated(folder_path)
     ''' =================合成图像2================='''
     # folder_path=[
-    #     r'C:\WorkSpace\serialPortVisualization\data\0825_1_result\isp_sensor_rawA_L50_LSC_AWB.jpg',
-    #     r'C:\WorkSpace\serialPortVisualization\data\0825_1_result\isp_sensor_rawA_L85_LSC_AWB.jpg',
-    #     r'C:\WorkSpace\serialPortVisualization\data\0825_1_result\isp_sensor_rawA_L120_LSC_AWB.jpg',
+    #     r'C:\WorkSpace\serialPortVisualization\data\0827_ColorChecker\demosaicResults\ccmResults\isp_sensor_rawA_.jpg',
+    #     r'C:\WorkSpace\serialPortVisualization\data\0827_ColorChecker\demosaicResults\ccmResults\isp_sensor_rawU30.jpg',
+    #     r'C:\WorkSpace\serialPortVisualization\data\0827_ColorChecker\demosaicResults\ccmResults\isp_sensor_rawCWF.jpg',
+    #     r'C:\WorkSpace\serialPortVisualization\data\0827_ColorChecker\demosaicResults\ccmResults\isp_sensor_rawD50.jpg',
+    #     r'C:\WorkSpace\serialPortVisualization\data\0827_ColorChecker\demosaicResults\ccmResults\isp_sensor_rawD60.jpg',
         
       
        
     # ]
-    # image_Concatenated_Matrix(folder_path,grid=(1, 3))
+    # image_Concatenated_Matrix(folder_path,grid=(1, 5))
     # image_Concatenated_Matrix_ForPng(folder_path,grid=(2, 3))
     '''=====================yaml可视化========================'''
     # folder_path= r'C:\WorkSpace\serialPortVisualization\data\0826_LSC_2'
