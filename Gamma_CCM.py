@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import yaml
 import os
+import sys
 from tools import *
 def reverseGamma(img):
     mask = img <= 0.04045
@@ -16,7 +17,7 @@ def Gamma(img):
     srgb = np.zeros_like(img)
     srgb[mask] = img[mask] * 12.92
     srgb[~mask] = 1.055 * (img[~mask] ** (1/2.4)) - 0.055
-    # return srgb
+    return srgb
     return img**(1/2.2)
 
     # gamma = 2.2
@@ -107,11 +108,17 @@ def img_uint8_to_float(img):
     imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # 转为RGB
     image_linear = imgRGB.astype(np.float64) / 255.0  # 归一化到[0,1]
     return image_linear
-def main():
 
+    
+    return rgb
+def main():
+    if len(sys.argv) != 2:
+        print("Usage: python Gamma_CCM.py <folder_path>")
+        sys.exit(1)
+    
+    folderPath = sys.argv[1]
     # Gamma(r"C:\serialPortVisualization\corrected_image.jpg")
-    folderPath = r'C:\WorkSpace\serialPortVisualization\data\0821_4'
-    yamlFile='ccmDict.yaml'
+    yamlFile='./config/ccmYaml.yaml'
 
 
     full_paths, basenames= get_paths(folderPath, suffix=".jpg")
@@ -126,23 +133,24 @@ def main():
         print(npToString(CCM))
         img= cv2.imread(path)
         img=img_uint8_to_float(img)
-        # img= ccmApply(img,CCM)
-        img= ccmApply_3x4(img,CCM)
-        img = np.clip(img, 0, 1) #img_CCM  范围0-1
+
+        # img= ccmApply_3x4(img,CCM)
+        img= ccmApply(img,CCM)
         img= Gamma(img) #img_Gamma  范围0-1
 
-        img= Contrast(img)
+        img = np.clip(img, 0, 1) #img_CCM  范围0-1
+
+        # img= Contrast(img)
         #
         img = (img * 255).astype(np.uint8) #img_CCM  范围0-1 
         img = np.clip(img, 0, 255)
 
-        imgName= basename+'_CCM.png'
-        cv2.imwrite(imgName, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        imgName= basename+'.jpg'
+
+        savePath=os.path.join(folderPath,'ccmResults')
+        if not os.path.exists(savePath):
+            os.makedirs(savePath)
+        imgSavePath=os.path.join(savePath,imgName)
+        cv2.imwrite(imgSavePath, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
 
 main()
-# img_Tmp = cv2.imread(imgName)
-
-# img_reversegamma= np.power(img_Tmp.astype(np.float32) / 255.0, 1/gamma)
-# # 保存反 Gamma 处理后的结果
-# imgName_reversegamma = "image_reversegamma.png"
-# cv2.imwrite(imgName_reversegamma, (img_reversegamma * 255).astype(np.uint8))

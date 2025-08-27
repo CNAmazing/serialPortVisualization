@@ -2,6 +2,13 @@ import os
 from pathlib import Path
 import yaml
 import numpy as np
+
+def readRaw(path,h,w):#path为raw文件所在路径
+    type = 'uint16' #得到数据格式，如uint8和uint16等
+    imgData = np.fromfile(path, dtype=type)
+    imgData = imgData.reshape(h, w)
+    return imgData
+
 def convert_numpy(obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
@@ -58,6 +65,8 @@ def getCTstr(file_path):
         return 'A'
     elif 'D60' in file_path:
         return 'D60'
+    elif 'D65' in file_path:
+        return 'D65'
 def get_paths(folder_name, suffix=".csv"):
     """
     递归获取指定文件夹及其子目录中的所有suffix图片路径及不带后缀的文件名

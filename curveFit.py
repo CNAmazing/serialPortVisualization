@@ -166,7 +166,7 @@ def processLSC(folderPath):
         saveYaml(result, basename)
         
 def main():
-    folderPath = r"C:\WorkSpace\serialPortVisualization\data\0821_Yaml"
+    folderPath = r"C:\WorkSpace\serialPortVisualization\data\0826_LSC_1"
     processLSC(folderPath)   
     """"
     计算给定x值的拟合曲线y值

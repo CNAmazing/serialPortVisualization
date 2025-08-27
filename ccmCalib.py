@@ -7,6 +7,8 @@ import os
 import yaml
 from tools import *
 from skimage.color import rgb2lab
+import csv
+
 def reverseGamma(img):
     mask = img <= 0.04045
     linear = np.zeros_like(img)
@@ -59,19 +61,18 @@ print(f"===IDEAL_LINEAR_RGB===\n{npToString(IDEAL_LINEAR_RGB)}")
 print(f"===gammaRGB===\n{npToString(gammaRGB)}")
 
 def readCSV(file_path):
-    import csv
     with open(file_path, 'r', encoding='utf-8') as file:
         reader = csv.reader(file)
         rows = list(reader)  # 将CSV转换为列表
         
         # 获取第3行第2列(索引从0开始)
         colorArr=[]
-        startRow= 58
+        startRow=10
         for i in range(24):
             rowIdx= startRow + i
-            R = float(rows[rowIdx][1])
-            G = float(rows[rowIdx][2])
-            B = float(rows[rowIdx][3])
+            R = float(rows[rowIdx][4])/255.0
+            G = float(rows[rowIdx][5])/255.0
+            B = float(rows[rowIdx][6])/255.0
             colorArr.append([float(R), float(G), float(B)])
         print(colorArr)
         return np.array(colorArr, dtype=np.float64)
@@ -121,16 +122,16 @@ class CCM_3x3:
         ccm = x.reshape(3, 3)  # 将扁平化的参数恢复为3x3矩阵
         predicted = np.dot(ccm,input)  # 应用颜色校正
 
-        # labPredicted= rgb_to_lab(predicted.T)  # 转换为Lab颜色空间
-        # labOutput = rgb_to_lab(output.T)  # 转换为Lab颜色空间
-        # labPredicted=labPredicted.T
-        # labOutput=labOutput.T
-        # sumTmp=np.sqrt(np.sum((labPredicted - labOutput)**2,axis=0))
+        labPredicted= rgb_to_lab(predicted.T)  # 转换为Lab颜色空间
+        labOutput = rgb_to_lab(output.T)  # 转换为Lab颜色空间
+        labPredicted=labPredicted.T
+        labOutput=labOutput.T
+        sumTmp=np.sqrt(np.sum((labPredicted - labOutput)**2,axis=0))
         # sumTmp[18]*=3
         # sumTmp[19]*=3
         # sumTmp[20]*=3
         # sumTmp[21]*=3
-        sumTmp=np.sqrt(np.sum((predicted - output)**2,axis=0))
+        # sumTmp=np.sqrt(np.sum((predicted - output)**2,axis=0))
       
         error = np.mean(sumTmp)  # MSE误差
         # print(f"error:{error}")
@@ -220,11 +221,10 @@ class CCM_3x4:
         # labPredicted=labPredicted.T
         # labOutput=labOutput.T
         # sumTmp=np.sqrt(np.sum((labPredicted - labOutput)**2,axis=0))
-        # sumTmp[18]*=3
-        # sumTmp[19]*=3
-        # sumTmp[20]*=3
-        # sumTmp[21]*=3
         sumTmp=np.sqrt(np.sum((predicted - output)**2,axis=0))
+        sumTmp[20]*=3
+        sumTmp[1]*=3
+      
       
         error = np.mean(sumTmp)  # MSE误差
         # print(f"error:{error}")
@@ -238,7 +238,6 @@ class CCM_3x4:
         C = np.zeros((3, 12))
         for i in range(3):
             C[i, 3*i : 3*i+3] = 1  # 每行对应矩阵M的一行的3个元素
-        print(f"===C===\n{npToString(C)}")
         # Cin=np.zeros((1, 9))
         # Cin[0, 4]=-1
         # Cin[0, 8]=1
@@ -294,7 +293,9 @@ def ccmInfer(csv_path):
     # input_arr = input_arr * scale  # 将输入数据缩放到0-1范围
     # input_arr = input_arr*255
 
-    ccmCalib= CCM_3x4(input_arr, IDEAL_LINEAR_RGB)
+    # ccmCalib= CCM_3x4(input_arr, IDEAL_LINEAR_RGB)
+    # ccmCalib= CCM_3x4(input_arr, IDEAL_RGB)
+    ccmCalib= CCM_3x3(input_arr, IDEAL_LINEAR_RGB)
     ccm= ccmCalib.infer_image()
     return ccm
 
@@ -334,7 +335,26 @@ def get_paths(folder_name, suffix=".csv"):
         print(f"错误: {e}")
         return [], []
 
+def readCCM3x3(file_path):
 
+    with open(file_path, 'r', encoding='utf-8') as file:
+        reader = csv.reader(file)
+        rows = list(reader)  # 将CSV转换为列表
+        
+        # 获取第3行第2列(索引从0开始)
+        ccmArr=[]
+        startRow= 125
+        for i in range(3):
+            rowIdx= startRow + i
+            Ci0 = float(rows[rowIdx][0])
+            Ci1 = float(rows[rowIdx][1])
+            Ci2  = float(rows[rowIdx][2])
+            ccmArr.append([float(Ci0), float(Ci1), float(Ci2)])
+        print(ccmArr)
+        return np.array(ccmArr, dtype=np.float64)
+def readCCM3x4(folderPath):
+    full_paths, basenames = get_paths(folderPath, suffix=".csv")
+    
 def folder_to_csv(folder_path):
     full_paths, basenames = get_paths(folder_path, suffix=".csv")
     ccmDict = {}
@@ -342,16 +362,22 @@ def folder_to_csv(folder_path):
 
         ct_str = getCTstr(basename)
         print(f"正在处理: {path}，CT类型: {ct_str}")
+        """标定算法"""
         ccmTmp=ccmInfer(path)
+
+        """读取CSV文件"""
+        # ccmTmp=readCCM3x3(path)
+        # ccmTmp=ccmTmp.T
+        '''保存ccm'''
         ccmTmp_oneline=ccmTmp.flatten()
         ccmDict[ct_str] =convert_numpy(ccmTmp) 
         ccmDict[f"{ct_str}_Nx1"] = convert_numpy(ccmTmp_oneline)
 
-    saveYaml(ccmDict, 'ccmDict')
+    saveYaml(ccmDict, './config/ccmYaml')
     
 def main():
         
-    folder_path= r'C:\WorkSpace\serialPortVisualization\data\0821_4'
+    folder_path= r'C:\WorkSpace\serialPortVisualization\data\0822_1'
     folder_to_csv(folder_path)
 
    
