@@ -59,7 +59,7 @@ def getCTstr(file_path):
         return 'CWF'
     elif 'D50' in file_path:
         return 'D50'
-    elif 'H_' in file_path:
+    elif 'H' in file_path:
         return 'H'
     elif 'A_' in file_path:
         return 'A'

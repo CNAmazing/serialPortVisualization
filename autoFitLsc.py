@@ -5,7 +5,21 @@ import cv2
 import numpy as np
 from tools import *
 from skimage.color import rgb2lab
-
+def AWB_RGB(image, awbParam):
+    """
+    应用红蓝通道白平衡矫正
+    :param image: 输入的RAW图像 (Bayer模式)
+    :param red_gain: 红色通道增益系数
+    :param blue_gain: 蓝色通道增益系数
+    :return: 白平衡矫正后的图像
+    """
+    rGain,grGain,gbGain,bGain = awbParam
+    # 创建输出图像
+    balanced = image.copy()
+    balanced[:,:,0]= np.clip(image[:,:,0] * bGain, 0, 255).astype(np.float64)
+    balanced[:,:,1]= np.clip(image[:,:,1] * ((grGain+gbGain)/2), 0, 255).astype(np.float64)
+    balanced[:,:,2]= np.clip(image[:,:,2] * rGain, 0, 255).astype(np.float64)
+    return balanced
 def AWB(image, awbParam):
     """
     应用红蓝通道白平衡矫正
@@ -225,10 +239,10 @@ class CCM_3x3:
         # labPredicted=labPredicted.T
         # labOutput=labOutput.T
         # sumTmp=np.sum((labPredicted - labOutput)**2,axis=0)
-        # sumTmp[18]*=3
-        # sumTmp[19]*=3
+ 
         sumTmp=np.sum((predicted - output)**2,axis=0)
-
+        # sumTmp[1]*=3
+        # sumTmp[23]*=3
         error = np.mean(sumTmp)  # MSE误差
         # print(f"error:{error}")
         # return((labPredicted - labOutput)**2).flatten()
@@ -279,14 +293,14 @@ class CCM_3x3:
             constraints=constraints,
             # bounds=bounds,
             method='SLSQP',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
-            options={'maxiter': 100000,'rhobeg': 1.0, 'rhoend': 1e-12,'disp': True}
+            options={'maxiter': 100000,'rhobeg': 1.0, 'rhoend': 1e-12,'disp': False}
         )
         # 打印优化结果的详细信息
   
 
         # 将优化结果恢复为CCM矩阵
         optimized_ccm = result.x.reshape(3, 3)
-        print("===ccm===\n",npToString(optimized_ccm))
+        # print("===ccm===\n",npToString(optimized_ccm))
 
         return optimized_ccm
     
@@ -481,96 +495,227 @@ def calColorError(img,area):
         avg_colors.append(mean_color)
     avg_colors= np.array(avg_colors)  # 返回一个包含所有色块平均颜色的数组
     labPredicted= rgb_to_lab(avg_colors)  # 转换为Lab颜色空间
-    labOutput = rgb_to_lab(IDEAL_LINEAR_RGB)  # 转换为Lab颜色空间
+    labOutput = rgb_to_lab(IDEAL_RGB)  # 转换为Lab颜色空间
     labPredicted=labPredicted.T
     labOutput=labOutput.T
     sumTmp=np.sqrt(np.sum((labPredicted - labOutput)**2,axis=0))
     error = np.mean(sumTmp)  # MSE误差
     # error=np.sqrt(np.sum((avg_colors - IDEAL_LINEAR_RGB)**2,axis=1))
     return error
+def autoFitAwb(image_folder):
+    full_paths, basenames = get_paths(image_folder,suffix=".pgm")
+
+    x=[1,1,1] #rGain, gGain, bGain
+    def loss (x, imgLSC,area):
+        rGain, gGain, bGain = x
+        awbParam=[bGain,gGain,gGain,rGain]
+        imgTmp=Demosaic(imgLSC)
+        imgTmp=np.clip(imgTmp,0,1023)
+        imgTmp = imgTmp/1023 # 归一化
+        imgTmp= AWB_RGB(imgTmp,awbParam)  # 假设红蓝通道增益为1.0
+        # print(f"去马赛克后图像尺寸: {imgTmp.shape},数据类型: {imgTmp.dtype},最小值: {imgTmp.min()}, 最大值: {imgTmp.max()},均值_8bit:{imgTmp.mean()/1023*255}")  # (高度, 宽度)
+        # imgTmp=imgTmp[...,::-1] # BGR转RGB
+
+        color_means= calColor(imgTmp,area)
+        # print(f"计算的色块平均RGB值: {color_means}...")
+        # ccmCalib= CCM_3x4(color_means, IDEAL_LINEAR_RGB) 
+        ccmCalib= CCM_3x3(color_means, IDEAL_LINEAR_RGB) 
+        ccm= ccmCalib.infer_image()
+        # imgTmp= ccmApply_3x4(imgTmp,ccm)
+        imgTmp= ccmApply(imgTmp,ccm)
+        imgTmp= Gamma(imgTmp)
+        error=calColorError(imgTmp,area)
+        print(f"rGain:{rGain:.2f}, gGain:{gGain:.2f}, bGain:{bGain:.2f}, error:{error:.2f}")
+        return  error
+    yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0826_LSC_low'
+    area=[[397, 493, 547, 643], [702, 493, 852, 643], [1007, 493, 1157, 643], [1312, 493, 1462, 643], [1617, 493, 1767, 643], [1922, 493, 2072, 643], [397, 798, 547, 948], [702, 798, 852, 948], [1007, 798, 1157, 948], [1312, 798, 1462, 948], [1617, 798, 1767, 948], [1922, 798, 2072, 948], [397, 1103, 547, 1253], [702, 1103, 852, 1253], [1007, 1103, 1157, 1253], [1312, 1103, 1462, 1253], [1617, 1103, 1767, 1253], [1922, 1103, 2072, 1253], [397, 1408, 547, 1558], [702, 1408, 852, 1558], [1007, 1408, 1157, 1558], [1312, 1408, 1462, 1558], [1617, 1408, 1767, 1558], [1922, 1408, 2072, 1558]]
+    # area=[[320, 410, 470, 560], [640, 410, 790, 560], [960, 410, 1110, 560], [1280, 410, 1430, 560], [1600, 410, 1750, 560], [1920, 410, 2070, 560], [320, 730, 470, 880], [640, 730, 790, 880], [960, 730, 1110, 880], [1280, 730, 1430, 880], [1600, 730, 1750, 880], [1920, 730, 2070, 880], [320, 1050, 470, 1200], [640, 1050, 790, 1200], [960, 1050, 1110, 1200], [1280, 1050, 1430, 1200], [1600, 1050, 1750, 1200], [1920, 1050, 2070, 1200], [320, 1370, 470, 1520], [640, 1370, 790, 1520], [960, 1370, 1110, 1520], [1280, 1370, 1430, 1520], [1600, 1370, 1750, 1520], [1920, 1370, 2070, 1520]]
+    for path,basename in zip(full_paths,basenames):
+        keyCT= getCTstr(path)
+       
+        print(f"Processing image: {path},colorTemp:{keyCT}...")   
+        # yaml_file = fr'C:\serialPortVisualization\data\0815_1_Config\isp_sensor_raw{keyCT}.yaml'
+        # yaml_file = ''
+        yaml_files,_= get_paths(yamlFolder,suffix=".yaml")
+        for yf in yaml_files:
+            if keyCT in yf:
+                yaml_file=yf
+                break
+        if yaml_file == '':
+            print(f"未找到对应的yaml文件，跳过处理: {keyCT}")
+            continue
+        print(f"Using yaml file: {yaml_file}...")
+        dataYaml = loadYaml(yaml_file)
+        gainList=[]
+        
+        mesh_R = np.array(dataYaml['R'])
+        mesh_Gr = np.array(dataYaml['Gr'])
+        mesh_Gb = np.array(dataYaml['Gb'])
+        mesh_B = np.array(dataYaml['B'])
+
+        gainList.append(mesh_R)
+        gainList.append(mesh_Gr)
+        gainList.append(mesh_Gb)
+        gainList.append(mesh_B)
+   
+        img = read_pgm_with_opencv(path)
+        print(f"图像尺寸: {img.shape},数据类型: {img.dtype},最小值: {img.min()}, 最大值: {img.max()},均值_10bit:{img.mean()},均值_8bit:{img.mean()/1023*255}")  # (高度, 宽度)
+        img= BLC(img,blcParam=16)
+        imgLSC=LSC(img,gainList,strength=[0.5,0.5,0.5,0.5])
+        minError=float('inf')
+        bestParam=None
+        bestCCM=None
+        saveFolderName='ispResults'
+        savePath=os.path.join(image_folder,saveFolderName)
+        bounds = [(0.5, 2), (0.5, 2), (0.5, 2)]
+        constraints = []
+
+        awbResult=minimize(
+            loss,  # 包装loss函数
+            x,  
+            args=(imgLSC,area),
+            # constraints=constraints,
+            bounds=[(0.5, 2.5), (0.5, 2.5), (0.5, 2.5)],
+            method='Nelder-Mead',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
+            options={'maxiter': 10000,'disp': True}
+        )
+        r,g,b=awbResult.x
+        bestParam=[b,g,g,r]
+        print(f"优化结果: {awbResult}")
+        # imgTmp= AWB(imgLSC,bestParam)  # 假设红蓝通道增益为1.0
+        imgTmp=Demosaic(imgLSC)
+        imgTmp=np.clip(imgTmp,0,1023)
+        imgTmp = imgTmp/1023 # 归一化
+        imgTmp=AWB_RGB(imgTmp,bestParam)
+        color_means= calColor(imgTmp,area)
+        # ccmCalib= CCM_3x4(color_means, IDEAL_LINEAR_RGB) 
+        ccmCalib= CCM_3x3(color_means, IDEAL_LINEAR_RGB) 
+        ccm= ccmCalib.infer_image()
+        # imgTmp= ccmApply_3x4(imgTmp,ccm)
+        imgTmp= ccmApply(imgTmp,ccm)
+        imgTmp= Gamma(imgTmp)
+        error=calColorError(imgTmp,area)
+        if error < minError:
+            minError=error
+            bestCCM=ccm
+        print(f"当前误差: {error:.2f}, 最小误差: {minError:.2f}")
+
+        imgTmp=imgTmp[...,::-1] # RGB转BGR
+        imgTmp = np.clip(imgTmp * 255, 0, 255)
+        imgTmp = imgTmp.astype(np.uint8)
+        os.makedirs(savePath, exist_ok=True)
+        imgSavePath=os.path.join(savePath, f"{keyCT}_error{error:.2f}.jpg")
+        cv2.imwrite(imgSavePath, imgTmp)
+        yamlConfig={
+            'awbParam': {
+                'R': float(f"{bestParam[3]:.4f}"),
+                'Gr': float(f"{bestParam[1]:.4f}"),
+                'Gb': float(f"{bestParam[2]:.4f}"),
+                'B': float(f"{bestParam[0]:.4f}"),
+            },
+            'CCM': bestCCM.tolist(),
+            'Error': float(f"{minError:.4f}"),
+        }
+        yamlSavePath=os.path.join(savePath, f"{keyCT}_ispConfig")
+        saveYaml(yamlConfig,yamlSavePath)
+        print(f"最佳awb参数: {bestParam}, 最小色彩误差: {minError},最佳CCM:\n{npToString(bestCCM)}")    
 def autoFitLsc(image_folder):
 
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
-    Rrange= np.arange(1.6, 1.9, 0.04)  # 红色通道增益范围
-    Brange= np.arange(0.8, 1.1, 0.04)  
-    Grange= np.arange(0.85, 1.05, 0.03)  
+    Rrange= np.arange(0.95, 1, 0.01)  
+    Brange= np.arange(1.7, 1.8, 0.01)  
+
     yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0826_LSC_low'
     area=[[400, 481, 550, 631], [710, 481, 860, 631], [1020, 481, 1170, 631], [1330, 481, 1480, 631], [1640, 481, 1790, 631], [1950, 481, 2100, 631], [400, 791, 550, 941], [710, 791, 860, 941], [1020, 791, 1170, 941], [1330, 791, 1480, 941], [1640, 791, 1790, 941], [1950, 791, 2100, 941], [400, 1101, 550, 1251], [710, 1101, 860, 1251], [1020, 1101, 1170, 1251], [1330, 1101, 1480, 1251], [1640, 1101, 1790, 1251], [1950, 1101, 2100, 1251], [400, 1411, 550, 1561], [710, 1411, 860, 1561], [1020, 1411, 1170, 1561], [1330, 1411, 1480, 1561], [1640, 1411, 1790, 1561], [1950, 1411, 2100, 1561]]
     for path,basename in zip(full_paths,basenames):
         keyCT= getCTstr(path)
        
         print(f"Processing image: {path},colorTemp:{keyCT}...")   
-        if keyCT !='A':
-            continue
         # yaml_file = fr'C:\serialPortVisualization\data\0815_1_Config\isp_sensor_raw{keyCT}.yaml'
-        yaml_file = ''
-        # yaml_files,_= get_paths(yamlFolder,suffix=".yaml")
-        # for yf in yaml_files:
-        #     if keyCT in yf:
-        #         yaml_file=yf
-        #         break
-        # if yaml_file == '':
-        #     print(f"未找到对应的yaml文件，跳过处理: {keyCT}")
-        #     continue
-        # print(f"Using yaml file: {yaml_file}...")
-        # dataYaml = loadYaml(yaml_file)
-        # gainList=[]
+        # yaml_file = ''
+        yaml_files,_= get_paths(yamlFolder,suffix=".yaml")
+        for yf in yaml_files:
+            if keyCT in yf:
+                yaml_file=yf
+                break
+        if yaml_file == '':
+            print(f"未找到对应的yaml文件，跳过处理: {keyCT}")
+            continue
+        print(f"Using yaml file: {yaml_file}...")
+        dataYaml = loadYaml(yaml_file)
+        gainList=[]
         
-        # mesh_R = np.array(dataYaml['R'])
-        # mesh_Gr = np.array(dataYaml['Gr'])
-        # mesh_Gb = np.array(dataYaml['Gb'])
-        # mesh_B = np.array(dataYaml['B'])
+        mesh_R = np.array(dataYaml['R'])
+        mesh_Gr = np.array(dataYaml['Gr'])
+        mesh_Gb = np.array(dataYaml['Gb'])
+        mesh_B = np.array(dataYaml['B'])
 
 
-        # gainList.append(mesh_R)
-        # gainList.append(mesh_Gr)
-        # gainList.append(mesh_Gb)
-        # gainList.append(mesh_B)
+        gainList.append(mesh_R)
+        gainList.append(mesh_Gr)
+        gainList.append(mesh_Gb)
+        gainList.append(mesh_B)
    
         img = read_pgm_with_opencv(path)
         print(f"图像尺寸: {img.shape},数据类型: {img.dtype},最小值: {img.min()}, 最大值: {img.max()},均值_10bit:{img.mean()},均值_8bit:{img.mean()/1023*255}")  # (高度, 宽度)
-        imgLSC= BLC(img,blcParam=16)
-        # imgLSC=LSC(img,gainList,strength=[0.5,0.5,0.5,0.5])
+        img= BLC(img,blcParam=16)
+        imgLSC=LSC(img,gainList,strength=[0.5,0.5,0.5,0.5])
         minError=float('inf')
         bestParam=None
         bestCCM=None
+        saveFolderName='ispResults'
+        savePath=os.path.join(image_folder,saveFolderName)
+
         for rGain in Rrange:
             for bGain in Brange:
-                    awbParam=[rGain,1,1,bGain]
-                    print(f"尝试awb参数: {awbParam}...")
+                    awbParam=[bGain,1,1,rGain]
+                    print(f"tring awb Param:R_{rGain:.2f}, B_{bGain:.2f}")
                     # awbParam=AWBList[keyCT]
-                    print(imgLSC[0:4,0:4])
+                    # print(imgLSC[0:4,0:4])
 
                     imgTmp= AWB(imgLSC,awbParam)  # 假设红蓝通道增益为1.0
                     imgTmp=np.clip(imgTmp,0,1023)
                     imgTmp=Demosaic(imgTmp)
                     imgTmp = imgTmp/1023 # 归一化
-                    print(f"去马赛克后图像尺寸: {imgTmp.shape},数据类型: {imgTmp.dtype},最小值: {imgTmp.min()}, 最大值: {imgTmp.max()},均值_8bit:{imgTmp.mean()/1023*255}")  # (高度, 宽度)
+                    # print(f"去马赛克后图像尺寸: {imgTmp.shape},数据类型: {imgTmp.dtype},最小值: {imgTmp.min()}, 最大值: {imgTmp.max()},均值_8bit:{imgTmp.mean()/1023*255}")  # (高度, 宽度)
                     # imgTmp=imgTmp[...,::-1] # BGR转RGB
 
                     color_means= calColor(imgTmp,area)
-                    print(f"计算的色块平均RGB值: {color_means}...")
+                    # print(f"计算的色块平均RGB值: {color_means}...")
                     # ccmCalib= CCM_3x4(color_means, IDEAL_LINEAR_RGB) 
                     ccmCalib= CCM_3x3(color_means, IDEAL_LINEAR_RGB) 
                     ccm= ccmCalib.infer_image()
                     # imgTmp= ccmApply_3x4(imgTmp,ccm)
                     imgTmp= ccmApply(imgTmp,ccm)
+                    
+                    imgTmp= Gamma(imgTmp)
                     error=calColorError(imgTmp,area)
                     if error < minError:
                         minError=error
                         bestParam=awbParam
                         bestCCM=ccm
-                    imgTmp= Gamma(imgTmp)
-                    imgTmp=imgTmp[...,::-1] # RGB转BGR
                     
-                    print(f"色彩误差: {error}...")
+                    print(f"当前误差: {error:.2f}, 最小误差: {minError:.2f}")
+
+                    imgTmp=imgTmp[...,::-1] # RGB转BGR
                     imgTmp = np.clip(imgTmp * 255, 0, 255)
                     imgTmp = imgTmp.astype(np.uint8)
-                    savePath=os.path.join(image_folder,'ispResults')
                     os.makedirs(savePath, exist_ok=True)
-                    imgSavePath=os.path.join(savePath, f"{basename}_R{rGain:.2f}_B{bGain:.2f}.jpg")
+                    imgSavePath=os.path.join(savePath, f"{keyCT}_R{rGain:.2f}_B{bGain:.2f}_error{error:.2f}.jpg")
                     cv2.imwrite(imgSavePath, imgTmp)
                     # writePgm(imgLSCTmp, basename)  
+        yamlConfig={
+            'awbParam': {
+                'R': float(f"{bestParam[3]:.4f}"),
+                'Gr': float(f"{bestParam[1]:.4f}"),
+                'Gb': float(f"{bestParam[2]:.4f}"),
+                'B': float(f"{bestParam[0]:.4f}"),
+            },
+            'CCM': bestCCM.tolist(),
+            'Error': float(f"{minError:.4f}"),
+        }
+        yamlSavePath=os.path.join(savePath, f"{keyCT}_ispConfig")
+        saveYaml(yamlConfig,yamlSavePath)
         print(f"最佳awb参数: {bestParam}, 最小色彩误差: {minError},最佳CCM:\n{npToString(bestCCM)}")    
 def main():
     if len(sys.argv) != 2:
@@ -578,6 +723,7 @@ def main():
         sys.exit(1)
     
     folderPath = sys.argv[1]
-    autoFitLsc(folderPath)
+    # autoFitLsc(folderPath)
+    autoFitAwb(folderPath)
 
 main()

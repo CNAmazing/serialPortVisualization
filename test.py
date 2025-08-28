@@ -2,18 +2,19 @@ import cv2
 import matplotlib.pyplot as plt
 
 # 1. 读取一张图像
-image = cv2.imread(r'C:\Users\admin\Pictures\Quicker_20250622_165325.png')
+image = cv2.imread(r'C:\WorkSpace\serialPortVisualization\data\0828_D60\ispResults\D60_error7.39.jpg')
 
 # 将BGR格式转换为RGB格式（Matplotlib使用RGB）
 image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+# image_rgb = cv2.cvtColor(image, cv2.IMREAD_UNCHANGED)
 
 # 2. 定义矩形的参数
 boxSize = 150
-interval = 160
+interval = 155
 
 # 起始坐标（第一个方块的左上角）
-start_x = 400
-start_y = 481
+start_x = 397
+start_y = 493
 
 boxList=[]
 # 3. 循环生成24个等距离的矩形（6行4列）

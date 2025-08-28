@@ -610,6 +610,7 @@ def AWB(image, awbParam):
     balanced[1::2, 1::2] = np.clip(image[1::2, 1::2] * bGain, 0, 1023).astype(np.float64)
     
     return balanced
+
 def adjust_rgb_by_blocks_optimized(image: np.ndarray, gainList) -> np.ndarray:
     # Split RGB channels
     b, g, r = cv2.split(image.astype('float32'))
@@ -1103,14 +1104,13 @@ def awbSearch(image_folder):
 def lenShadingCorrection(image_folder):
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
     AWBList=loadYaml(r'C:\WorkSpace\serialPortVisualization\config\AWBResultsCopy.yaml')
-    yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0826_LSC_mid'
+    yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0826_LSC_low'
     
     for path,basename in zip(full_paths,basenames):
         keyCT= getCTstr(path)
        
         print(f"Processing image: {path},colorTemp:{keyCT}...")   
-        if keyCT !='U30':
-            continue
+     
         # yaml_file = fr'C:\serialPortVisualization\data\0815_1_Config\isp_sensor_raw{keyCT}.yaml'
         yaml_file = ''
         yaml_files,_= get_paths(yamlFolder,suffix=".yaml")
@@ -1144,7 +1144,7 @@ def lenShadingCorrection(image_folder):
         # img=LSC(img,gainList,strength=[0.908,0.942,0.942,0.916])
         # img=LSC(img,gainList,strength=[0.707,0.783,0.822,0.77])
 
-        img=LSC(img,gainList,strength=[1,1,1,1])
+        # img=LSC(img,gainList,strength=[1,1,1,1])
 
         img= AWB(img,awbParam)  # 假设红蓝通道增益为1.0
         imgLSCTmp= img.copy()
@@ -1401,7 +1401,7 @@ def main():
     # lenShadingCalibration(folder_path)
     """"=============================应用代码============================="""
     # lenShadingCorrection(folderPath)
-    # lenShadingCorrection(folderPath)
+    lenShadingCorrection(folderPath)
     # awbSearch(folderPath)
 
     """=====================================pngLSC====================================="""
