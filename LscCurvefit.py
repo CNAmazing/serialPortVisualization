@@ -1,9 +1,16 @@
 import numpy as np
 from scipy.optimize import curve_fit
+from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import inspect
 from tools import *
+import scienceplots  # 导入科学绘图样式
+
+# 使用SCI论文样式
+plt.style.use(['science', 'no-latex'])  # 不使用LaTeX渲染
+# 使用LaTeX渲染
+plt.rcParams['font.size'] = 14          # 全局字体大小
 mpl.rcParams['font.family'] = 'Microsoft YaHei'
 
 # 指数衰减函数: a * e^(-k*x) + c
@@ -35,9 +42,10 @@ def func_sqrt(x, a, b):
 def func_1_x(x, a, b, c):
     return a / (x + b) + c
 
-def func_1_r2_r4(x, a, b,c ):
+def func_1_r2_r4_1(x, a, b,c ):
     return 1+ a * x + b * x**3+c* x**4
-
+def func_1_r2_r4(x, a,b,c ):
+    return 1+ a * x*x +b*x**3 +c* x**4
 def curveFit(data,func):
     # 获取函数的参数信息
     sig = inspect.signature(func)
@@ -59,7 +67,7 @@ def curveFit(data,func):
     params, covariance = curve_fit(func, x, y, p0=p0,maxfev=100000)  # 设置边界条件，避免参数为负值
     param_errors = np.sqrt(np.diag(covariance))
 
-    print(f"param_errors: {param_errors}")
+    # print(f"param_errors: {param_errors}")
     param_values = {}
     for name, value in zip(fit_param_names, params):
         param_values[name] = value
@@ -68,15 +76,15 @@ def curveFit(data,func):
     # 计算拟合值
     y_fit = func(x,*params)
 
-    
-    plt.scatter(x, y, label="原始数据")
-    plt.plot(x, y_fit, 'r-', label="拟合曲线")
-    plt.legend()
-    plt.show()
-    param_str = ", ".join([f"{name}={value}" for name, value in param_values.items()])
-    paramError_str = ", ".join([f"{name}误差={error}" for name, error in zip(fit_param_names, param_errors)])
-    print(f"拟合参数: {param_str}")
-    print(f"拟合误差: {paramError_str}")
+    # plt.figure(figsize=(14,7)) 
+    # plt.scatter(x, y, label="原始数据")
+    # plt.plot(x, y_fit, 'r-', label="拟合曲线")
+    # plt.legend()
+    # plt.show()
+    # param_str = ", ".join([f"{name}={value}" for name, value in param_values.items()])
+    # paramError_str = ", ".join([f"{name}误差={error}" for name, error in zip(fit_param_names, param_errors)])
+    # print(f"拟合参数: {param_str}")
+    # print(f"拟合误差: {paramError_str}")
     return params
 def regularizeData(X):
     for x in X:
@@ -93,7 +101,7 @@ def generater2(x,y,m=24,n=32):
     dx = (x - m / 2 + 0.5) * asymmetry
     r2 = (dx * dx + dy * dy) / R2
     return r2
-def generater2(x, y, m=24, n=32, center_x=0.5, center_y=0.5, asymmetry=1.0):
+def generater2Center(x, y, m=24, n=32, center_x=0.5, center_y=0.5, asymmetry=1.0):
     """
     Calculate the normalized squared distance from (x,y) to a custom center point.
     
@@ -148,7 +156,7 @@ def generate_lut(m: int, n: int,  ):
             lut[x][y] = r2 # reproduces the cos^4 rule
     
     return np.array(lut)
-def generate_lut2(m: int, n: int, center_x: float = 0.52, center_y: float = 0.52, c_strength: float = 1.0):
+def generate_lut2(m: int, n: int, center_x: float = 0.5, center_y: float = 0.5, c_strength: float = 1.0):
     """
     Generate a lookup table for brightness adjustment with adjustable center.
     
@@ -230,10 +238,78 @@ def processLSC(folderPath):
                     lut[i][j] = func_1_r2_r4(generater2(i, j, m, n), *params)
             result[t]= convert_numpy(lut)
         saveYaml(result, basename)
+def lscCenterCheck(data):
+    typeChannel = ['R', 'Gr', 'Gb', 'B']
+    rData=data['R']
+
+    grData=data['Gr']
+    gbData=data['Gb']
+    bData=data['B']
+    m= len(rData)
+    n= len(rData[0])
+
+    rData, grData, gbData, bData = np.array(rData), np.array(grData), np.array(gbData), np.array(bData)
+    rData, grData, gbData, bData = rData.flatten(), grData.flatten(), gbData.flatten(), bData.flatten()
+    rgbData=[rData, grData, gbData, bData]
+
+    def loss (params,rgbData):
+        tmpX, tmpY = params
+        xLocation=generate_lut2(m-1,n-1 , tmpX, tmpY)
+        error=0.0
+        for idx in range(4):
+            tmpData=rgbData[idx]
+            dataLut= np.column_stack((xLocation.flatten(), tmpData))
+            params = curveFit(dataLut, func=func_1_r2_r4)
+            lut = np.zeros((m , n ))
+            for j in range(n ):
+                for i in range(m ):
+                    lut[i][j] = func_1_r2_r4(generater2Center(i, j, m, n,tmpX,tmpY), *params)
+            lut=lut.flatten()
+            error+=np.mean(np.sqrt((tmpData - lut) ** 2))
+        print(f"当前中心点: ({tmpX:.4f}, {tmpY:.4f}),误差: {error:.4f}")
+        return error
+    result = minimize(  loss,
+                        x0=[0.5, 0.5],
+                        args=(rgbData,),
+                        method='L-BFGS-B',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
+                        bounds=[(0, 1), (0, 1)])
+    centerX,centerY=result.x
+    print(f"优化后中心点: ({centerX:.4f}, {centerY:.4f})")
+    return centerX,centerY
+def processLscCurfit(folderPath):
+    """处理LSC数据"""
+    full_paths, basenames = get_paths(folderPath, suffix=".yaml")
+    for path, basename in zip(full_paths, basenames):
+        print(f'Processing: {path}...')
+        data = loadYaml(path)
+        result = {}
+        typeChannel = ['R', 'Gr', 'Gb', 'B']
+        centerX,centerY=lscCenterCheck(data)
+        for t in typeChannel:
+            dataLut= data[t]
         
+            m = len(dataLut) 
+            n = len(dataLut[0]) 
+            xIdx = generate_lut2(m-1, n-1,centerX,centerY)
+            dataLut = np.array(dataLut)
+            # xIdx = xIdx[:, :xIdx.shape[1]//2]  
+            # dataLut = dataLut[:, :dataLut.shape[1]//2] 
+            dataLut = dataLut.flatten()
+            xIdx = xIdx.flatten()
+            dataLut = np.column_stack((xIdx, dataLut))
+            
+            params = curveFit(dataLut, func=func_1_r2_r4)
+            
+            lut = np.zeros((m , n ))
+            for j in range(n ):
+                for i in range(m ):
+                    lut[i][j] = func_1_r2_r4(generater2Center(i, j, m, n,centerX,centerY), *params)
+            result[t]= convert_numpy(lut)
+        saveYaml(result, basename)
+             
 def main():
     folderPath = r"C:\WorkSpace\serialPortVisualization\data\0901LscConfig"
-    processLSC(folderPath)   
+    processLscCurfit(folderPath)   
     """"
     计算给定x值的拟合曲线y值
     """

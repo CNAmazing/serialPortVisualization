@@ -5,6 +5,9 @@ import cv2
 import numpy as np
 from tools import *
 from skimage.color import rgb2lab
+import time
+from functools import wraps
+
 def AWB_RGB(image, awbParam):
     """
     应用红蓝通道白平衡矫正
@@ -502,10 +505,28 @@ def calColorError(img,area):
     error = np.mean(sumTmp)  # MSE误差
     # error=np.sqrt(np.sum((avg_colors - IDEAL_LINEAR_RGB)**2,axis=1))
     return error
-def autoFitAwb(image_folder):
-    full_paths, basenames = get_paths(image_folder,suffix=".pgm")
 
-    x=[1,1,1] #rGain, gGain, bGain
+def timeit(func):
+    start_time = time.time()
+    call_count = 0
+    
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        
+        result = func(*args, **kwargs)
+        
+        elapsed = time.time() - start_time
+        avg_time = elapsed / call_count if call_count > 0 else 0
+        print(f"   [{call_count}] 总耗时: {elapsed:.2f}s, 平均耗时: {avg_time:.2f}s")
+        
+        return result
+    
+    return wrapper
+def autoFitAwb(image_folder):
+    
+    @timeit
     def loss (x, imgLSC,area):
         rGain, gGain, bGain = x
         awbParam=[bGain,gGain,gGain,rGain]
@@ -525,11 +546,16 @@ def autoFitAwb(image_folder):
         imgTmp= ccmApply(imgTmp,ccm)
         imgTmp= Gamma(imgTmp)
         error=calColorError(imgTmp,area)
-        print(f"rGain:{rGain:.2f}, gGain:{gGain:.2f}, bGain:{bGain:.2f}, error:{error:.2f}")
+        print(f"rGain:{rGain:.2f}, gGain:{gGain:.2f}, bGain:{bGain:.2f}, error:{error:.2f}" ,end='')
         return  error
-    yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0826_LSC_low'
-    area=[[397, 493, 547, 643], [702, 493, 852, 643], [1007, 493, 1157, 643], [1312, 493, 1462, 643], [1617, 493, 1767, 643], [1922, 493, 2072, 643], [397, 798, 547, 948], [702, 798, 852, 948], [1007, 798, 1157, 948], [1312, 798, 1462, 948], [1617, 798, 1767, 948], [1922, 798, 2072, 948], [397, 1103, 547, 1253], [702, 1103, 852, 1253], [1007, 1103, 1157, 1253], [1312, 1103, 1462, 1253], [1617, 1103, 1767, 1253], [1922, 1103, 2072, 1253], [397, 1408, 547, 1558], [702, 1408, 852, 1558], [1007, 1408, 1157, 1558], [1312, 1408, 1462, 1558], [1617, 1408, 1767, 1558], [1922, 1408, 2072, 1558]]
+    
+    full_paths, basenames = get_paths(image_folder,suffix=".raw")
+
+    x=[1,1,1] #rGain, gGain, bGain
+    yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0901lscConfig2'
+    # area=[[397, 493, 547, 643], [702, 493, 852, 643], [1007, 493, 1157, 643], [1312, 493, 1462, 643], [1617, 493, 1767, 643], [1922, 493, 2072, 643], [397, 798, 547, 948], [702, 798, 852, 948], [1007, 798, 1157, 948], [1312, 798, 1462, 948], [1617, 798, 1767, 948], [1922, 798, 2072, 948], [397, 1103, 547, 1253], [702, 1103, 852, 1253], [1007, 1103, 1157, 1253], [1312, 1103, 1462, 1253], [1617, 1103, 1767, 1253], [1922, 1103, 2072, 1253], [397, 1408, 547, 1558], [702, 1408, 852, 1558], [1007, 1408, 1157, 1558], [1312, 1408, 1462, 1558], [1617, 1408, 1767, 1558], [1922, 1408, 2072, 1558]]
     # area=[[320, 410, 470, 560], [640, 410, 790, 560], [960, 410, 1110, 560], [1280, 410, 1430, 560], [1600, 410, 1750, 560], [1920, 410, 2070, 560], [320, 730, 470, 880], [640, 730, 790, 880], [960, 730, 1110, 880], [1280, 730, 1430, 880], [1600, 730, 1750, 880], [1920, 730, 2070, 880], [320, 1050, 470, 1200], [640, 1050, 790, 1200], [960, 1050, 1110, 1200], [1280, 1050, 1430, 1200], [1600, 1050, 1750, 1200], [1920, 1050, 2070, 1200], [320, 1370, 470, 1520], [640, 1370, 790, 1520], [960, 1370, 1110, 1520], [1280, 1370, 1430, 1520], [1600, 1370, 1750, 1520], [1920, 1370, 2070, 1520]]
+    area=[[710, 471, 840, 601], [965, 471, 1095, 601], [1220, 471, 1350, 601], [1475, 471, 1605, 601], [1730, 471, 1860, 601], [1985, 471, 2115, 601], [710, 726, 840, 856], [965, 726, 1095, 856], [1220, 726, 1350, 856], [1475, 726, 1605, 856], [1730, 726, 1860, 856], [1985, 726, 2115, 856], [710, 981, 840, 1111], [965, 981, 1095, 1111], [1220, 981, 1350, 1111], [1475, 981, 1605, 1111], [1730, 981, 1860, 1111], [1985, 981, 2115, 1111], [710, 1236, 840, 1366], [965, 1236, 1095, 1366], [1220, 1236, 1350, 1366], [1475, 1236, 1605, 1366], [1730, 1236, 1860, 1366], [1985, 1236, 2115, 1366]]
     for path,basename in zip(full_paths,basenames):
         keyCT= getCTstr(path)
        
@@ -558,10 +584,12 @@ def autoFitAwb(image_folder):
         gainList.append(mesh_Gb)
         gainList.append(mesh_B)
    
-        img = read_pgm_with_opencv(path)
+        # img = read_pgm_with_opencv(path)
+        img = readRaw(path,h=1944,w=2592)  # 读取为numpy数组
         print(f"图像尺寸: {img.shape},数据类型: {img.dtype},最小值: {img.min()}, 最大值: {img.max()},均值_10bit:{img.mean()},均值_8bit:{img.mean()/1023*255}")  # (高度, 宽度)
-        img= BLC(img,blcParam=16)
-        imgLSC=LSC(img,gainList,strength=[0.5,0.5,0.5,0.5])
+        img= BLC(img,blcParam=64)
+        # imgLSC=LSC(img,gainList,strength=[1,1,1,1])
+        imgLSC=img
         minError=float('inf')
         bestParam=None
         bestCCM=None
@@ -606,6 +634,12 @@ def autoFitAwb(image_folder):
         os.makedirs(savePath, exist_ok=True)
         imgSavePath=os.path.join(savePath, f"{keyCT}_error{error:.2f}.jpg")
         cv2.imwrite(imgSavePath, imgTmp)
+        awbParamNormalized=bestParam/bestParam[1]
+        ccmNormalized= bestCCM*bestParam[1]
+        awbx1e8=awbParamNormalized*100000000
+        ccmx1e8= ccmNormalized*100000000
+        awbx1e8=awbx1e8.astype(np.int64)
+        ccmx1e8=ccmx1e8.astype(np.int64)
         yamlConfig={
             'awbParam': {
                 'R': float(f"{bestParam[3]:.4f}"),
@@ -615,6 +649,20 @@ def autoFitAwb(image_folder):
             },
             'CCM': bestCCM.tolist(),
             'Error': float(f"{minError:.4f}"),
+            'awbParamNormalized': {
+                'R': float(f"{awbParamNormalized[3]:.4f}"),
+                'Gr': float(f"{awbParamNormalized[1]:.4f}"),
+                'Gb': float(f"{awbParamNormalized[2]:.4f}"),
+                'B': float(f"{awbParamNormalized[0]:.4f}"),
+            },
+            'CCMNormalized': ccmNormalized.tolist(),
+            'awbParam_x100000000': {
+                'R': int(f"{awbx1e8[3]}"),
+                'Gr':int(f"{awbx1e8[1]}"),
+                'Gb':int(f"{awbx1e8[2]}"),
+                'B': int(f"{awbx1e8[0]}"),
+            },
+            'CCM_x100000000': ccmx1e8.tolist(),
         }
         yamlSavePath=os.path.join(savePath, f"{keyCT}_ispConfig")
         saveYaml(yamlConfig,yamlSavePath)
@@ -625,7 +673,7 @@ def autoFitLsc(image_folder):
     Rrange= np.arange(0.95, 1, 0.01)  
     Brange= np.arange(1.7, 1.8, 0.01)  
 
-    yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0826_LSC_low'
+    yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0901lscConfig2'
     area=[[400, 481, 550, 631], [710, 481, 860, 631], [1020, 481, 1170, 631], [1330, 481, 1480, 631], [1640, 481, 1790, 631], [1950, 481, 2100, 631], [400, 791, 550, 941], [710, 791, 860, 941], [1020, 791, 1170, 941], [1330, 791, 1480, 941], [1640, 791, 1790, 941], [1950, 791, 2100, 941], [400, 1101, 550, 1251], [710, 1101, 860, 1251], [1020, 1101, 1170, 1251], [1330, 1101, 1480, 1251], [1640, 1101, 1790, 1251], [1950, 1101, 2100, 1251], [400, 1411, 550, 1561], [710, 1411, 860, 1561], [1020, 1411, 1170, 1561], [1330, 1411, 1480, 1561], [1640, 1411, 1790, 1561], [1950, 1411, 2100, 1561]]
     for path,basename in zip(full_paths,basenames):
         keyCT= getCTstr(path)

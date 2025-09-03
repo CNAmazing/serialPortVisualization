@@ -603,11 +603,11 @@ def AWB(image, awbParam):
     balanced = image.copy()
     
     # 矫正红色通道 (R位于偶数行偶数列)
-    balanced[::2, ::2] = np.clip(image[::2, ::2] * rGain, 0, 1023).astype(np.float64)
+    balanced[1::2, 1::2] = np.clip(image[1::2, 1::2] * rGain, 0, 1023).astype(np.float64)
     balanced[::2, 1::2] = np.clip(image[::2, 1::2] * grGain, 0, 1023).astype(np.float64)
-    balanced[1::2, ::2] = np.clip(image[::2, 1::2] * gbGain, 0, 1023).astype(np.float64)
+    balanced[1::2, ::2] = np.clip(image[1::2, ::2] * gbGain, 0, 1023).astype(np.float64)
     # 矫正蓝色通道 (B位于奇数行奇数列)
-    balanced[1::2, 1::2] = np.clip(image[1::2, 1::2] * bGain, 0, 1023).astype(np.float64)
+    balanced[::2, ::2] = np.clip(image[::2, ::2] * bGain, 0, 1023).astype(np.float64)
     
     return balanced
 
@@ -852,7 +852,7 @@ def lenShadingCalibration(image_folder):
     full_paths, basenames = get_paths(image_folder,suffix=".pgm")
     for path,basename in zip(full_paths,basenames):
         pgm_image = read_pgm_with_opencv(path)
-        blcParam=16
+        blcParam=64
         pgm_image= pgm_image - blcParam 
         # print(pgm_image)
         if pgm_image is not None:
@@ -874,18 +874,18 @@ def lenShadingCalibration(image_folder):
 def lenShadingCalibrationForRaw(image_folder,h,w):
     full_paths, basenames = get_paths(image_folder,suffix=".raw")
     for path,basename in zip(full_paths,basenames):
-        rawImage = read_pgm_with_opencv(path)
+        # rawImage = read_pgm_with_opencv(path)
         rawImage=readRaw(path,h,w)
         blcParam=64
         rawImage= rawImage - blcParam
-        if rawImage is not None:
+        if rawImage is  None:
             raise ValueError("raw data is None")
         avgLRaw= rawImage.mean()
         avgLRaw=avgLRaw/1023*255
         print(f"图像尺寸: {rawImage.shape},数据类型: {rawImage.dtype},最小值: {rawImage.min()}, 最大值: {rawImage.max()},均值_10bit:{rawImage.mean()},均值_8bit:{avgLRaw}")  # (高度, 宽度)
         
         resultList=[]
-        for s in range(10,15,2):
+        for s in range(4,16,2):
             resultTmp = lsc_calib(rawImage, mesh_h_nums=24, mesh_w_nums=32, sample_size=s,maxFactor=1.0)
 
             # printCornerValues_RGGB(resultTmp)
@@ -951,7 +951,7 @@ def writePgm(image, basename):
 def Demosaic(bayer_pgm):
     # 常见选项：COLOR_BAYER_BG2RGB, COLOR_BAYER_RG2RGB, COLOR_BAYER_GB2RGB 等
     bayer_pgm= bayer_pgm.astype(np.uint16)  # 确保数据类型为 uint16
-    rgb = cv2.cvtColor(bayer_pgm, cv2.COLOR_BAYER_RGGB2RGB)
+    rgb = cv2.cvtColor(bayer_pgm, cv2.COLOR_BAYER_BGGR2RGB)
     return rgb
 def center_symmetric_avg(matrix):
     return (matrix + np.flip(matrix, axis=0)+np.flip(matrix, axis=1)+np.flip(matrix)) / 4
@@ -1100,63 +1100,96 @@ def awbSearch(image_folder):
                 imgSavePath=os.path.join(savePath, f"{basename}_R{rGain:.2f}_B{bGain:.2f}.jpg")
                 cv2.imwrite(imgSavePath, img)
                 # writePgm(imgLSCTmp, basename)  
-        
-def lenShadingCorrection(image_folder):
-    full_paths, basenames = get_paths(image_folder,suffix=".pgm")
-    AWBList=loadYaml(r'C:\WorkSpace\serialPortVisualization\config\AWBResultsCopy.yaml')
-    yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0826_LSC_low'
+def lscParamSearch(yamlFolder,keyCT):
+    yaml_file = ''
+    yaml_files,_= get_paths(yamlFolder,suffix=".yaml")
+    for yf in yaml_files:
+        if keyCT in yf:
+            yaml_file=yf
+            break
+    if yaml_file == '':
+        print(f"未找到对应的yaml文件，跳过处理: {keyCT}")
+        return []
+    print(f"Using yaml file: {yaml_file}...")
+    dataYaml = loadYaml(yaml_file)
+    gainList=[]
     
+    mesh_R = np.array(dataYaml['R'])
+    mesh_Gr = np.array(dataYaml['Gr'])
+    mesh_Gb = np.array(dataYaml['Gb'])
+    mesh_B = np.array(dataYaml['B'])
+
+
+    gainList.append(mesh_R)
+    gainList.append(mesh_Gr)
+    gainList.append(mesh_Gb)
+    gainList.append(mesh_B)
+    return gainList
+
+def awbParamSearch(yamlFolder,keyCT):
+    yaml_file = ''
+    yaml_files,_= get_paths(yamlFolder,suffix=".yaml")
+    for yf in yaml_files:
+        if keyCT in yf:
+            yaml_file=yf
+            break
+    if yaml_file == '':
+        print(f"未找到对应的yaml文件，跳过处理: {keyCT}")
+        return []
+    print(f"Using yaml file: {yaml_file}...")
+    dataYaml = loadYaml(yaml_file)
+    awbParam=[]
+    awbData=dataYaml['awbParam']
+    rGain=awbData['R']
+    grGain=awbData['Gr']
+    gbGain=awbData['Gb']
+    bGain=awbData['B']
+    
+    awbParam.append(rGain)
+    awbParam.append(grGain)
+    awbParam.append(gbGain)
+    awbParam.append(bGain)
+
+    return awbParam
+
+
+def lenShadingCorrection(image_folder):
+    full_paths, basenames = get_paths(image_folder,suffix=".raw")
+    awbFolder=r'C:\WorkSpace\serialPortVisualization\data\g07s5ColorChecker\ispResults'
+    yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0901lscConfig2'
     for path,basename in zip(full_paths,basenames):
         keyCT= getCTstr(path)
        
         print(f"Processing image: {path},colorTemp:{keyCT}...")   
-     
-        # yaml_file = fr'C:\serialPortVisualization\data\0815_1_Config\isp_sensor_raw{keyCT}.yaml'
-        yaml_file = ''
-        yaml_files,_= get_paths(yamlFolder,suffix=".yaml")
-        for yf in yaml_files:
-            if keyCT in yf:
-                yaml_file=yf
-                break
-        if yaml_file == '':
+        gainList= lscParamSearch(yamlFolder,keyCT)
+        if len(gainList)==0:
             print(f"未找到对应的yaml文件，跳过处理: {keyCT}")
             continue
-        print(f"Using yaml file: {yaml_file}...")
-        dataYaml = loadYaml(yaml_file)
-        gainList=[]
-        
-        mesh_R = np.array(dataYaml['R'])
-        mesh_Gr = np.array(dataYaml['Gr'])
-        mesh_Gb = np.array(dataYaml['Gb'])
-        mesh_B = np.array(dataYaml['B'])
-
-
-        gainList.append(mesh_R)
-        gainList.append(mesh_Gr)
-        gainList.append(mesh_Gb)
-        gainList.append(mesh_B)
-   
-        img = read_pgm_with_opencv(path)
+        awbParam= awbParamSearch(awbFolder,keyCT)
+        if len(awbParam)==0:
+            print(f"未找到对应的yaml文件，跳过处理: {keyCT}")
+            continue
+      
+        img = readRaw(path,h=1944,w=2592)
         print(f"图像尺寸: {img.shape},数据类型: {img.dtype},最小值: {img.min()}, 最大值: {img.max()},均值_10bit:{img.mean()},均值_8bit:{img.mean()/1023*255}")  # (高度, 宽度)
-        img= BLC(img,blcParam=16)
-        awbParam=AWBList[keyCT]
+        img= BLC(img,blcParam=64)
+        # awbParam=AWBList[keyCT]
         strengthList=[]
         # img=LSC(img,gainList,strength=[0.908,0.942,0.942,0.916])
         # img=LSC(img,gainList,strength=[0.707,0.783,0.822,0.77])
 
-        # img=LSC(img,gainList,strength=[1,1,1,1])
-
+        img=LSC(img,gainList,strength=[1,1,1,1])
+        print(awbParam)
         img= AWB(img,awbParam)  # 假设红蓝通道增益为1.0
-        imgLSCTmp= img.copy()
 
         img=Demosaic(img)
         img = img/1023 * 255  # 将16位数据转换为8位
         img = img.astype(np.uint8)
+        img=img[:, :, ::-1]  
         savePath=os.path.join(image_folder,'demosaicResults')
         os.makedirs(savePath, exist_ok=True)
         imgSavePath=os.path.join(savePath, f"{basename}.jpg")
         cv2.imwrite(imgSavePath, img)
-        # writePgm(imgLSCTmp, basename)  
         
 def lenShadingCorrectionFor_Png(image_folder,yaml_file=None):
     full_paths, basenames = get_paths(image_folder,suffix=".png")
@@ -1399,8 +1432,8 @@ def main():
     """"=============================标定代码============================="""
     # folder_path= r'C:\WorkSpace\serialPortVisualization\data\0822_LSC'
     # lenShadingCalibration(folder_path)
+    # lenShadingCalibrationForRaw(folderPath,h=1944,w=2592)
     """"=============================应用代码============================="""
-    # lenShadingCorrection(folderPath)
     lenShadingCorrection(folderPath)
     # awbSearch(folderPath)
 
@@ -1435,7 +1468,7 @@ def main():
     # image_Concatenated_Matrix_ForPng(folder_path,grid=(2, 3))
     '''=====================yaml可视化========================'''
     # folder_path= r'C:\WorkSpace\serialPortVisualization\data\0826_LSC_2'
-    # loadYamlVisualization(folder_path)
+    # loadYamlVisualization(folderPath)
 
     '''=====================拟合strength========================'''
     # inputMatrix= loadYaml(r'C:\WorkSpace\serialPortVisualization\data\0825_LSC_curveFit\LSC_A_L122.yaml')

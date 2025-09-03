@@ -61,7 +61,7 @@ def getCTstr(file_path):
         return 'D50'
     elif 'H' in file_path:
         return 'H'
-    elif 'A_' in file_path:
+    elif 'A' in file_path:
         return 'A'
     elif 'D60' in file_path:
         return 'D60'
