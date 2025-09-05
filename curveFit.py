@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import inspect
 from tools import *
+
 mpl.rcParams['font.family'] = 'Microsoft YaHei'
 
 # 指数衰减函数: a * e^(-k*x) + c
@@ -72,6 +73,7 @@ def curveFit(data,func):
     plt.scatter(x, y, label="原始数据")
     plt.plot(x, y_fit, 'r-', label="拟合曲线")
     plt.legend()
+    plt.grid(True) 
     plt.show()
     param_str = ", ".join([f"{name}={value}" for name, value in param_values.items()])
     paramError_str = ", ".join([f"{name}误差={error}" for name, error in zip(fit_param_names, param_errors)])
@@ -232,17 +234,45 @@ def processLSC(folderPath):
         saveYaml(result, basename)
         
 def main():
-    folderPath = r"C:\WorkSpace\serialPortVisualization\data\0901LscConfig"
-    processLSC(folderPath)   
+
+
+    # folderPath = r"C:\WorkSpace\serialPortVisualization\data\0901LscConfig"
+    # processLSC(folderPath)   
+
+    '''参数拟合部分'''
+    data=np.array([[3174,2800],
+                   [3232,2800],
+                   [3242,2800],
+                   [3270,2800],
+                   [3894,3500],
+                   [3856,3500],
+                   [3910,3500],
+                   [3904,3500],
+                   [4369,4000],
+                   [4448,4000],
+                   [4469,4000],
+                   [4409,4000],
+                   [5243,5000],
+                   [5158,5000],
+                   [5258,5000],
+                   [5108,5000],
+                   [5951,6000],
+                   [5937,6000],
+                   [5703,6000],
+                   [5860,6000],
+                
+                
+    ])
+    params=curveFit(data,func=func_quad)
     """"
     计算给定x值的拟合曲线y值
     """
-    # x=[]
-    # for i in range(0,10,1):
-    #     x.append(i/10)
-    # x=np.array(x)
-    # # a, b, c = 36984.00,0.41,3431.71
-    # valueCal(x,*params,func=func_1_r2_r4)
+    x=[]
+    for i in range(0,10,1):
+        x.append(i/10)
+    x=np.array(x)
+    # a, b, c = 36984.00,0.41,3431.71
+    valueCal(x,*params,func=func_quad)
 
 main()
 

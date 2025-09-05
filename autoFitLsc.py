@@ -5,8 +5,12 @@ import cv2
 import numpy as np
 from tools import *
 from skimage.color import rgb2lab
+
 import time
 from functools import wraps
+from colormath.color_objects import LabColor, sRGBColor
+from colormath.color_diff import delta_e_cie2000, delta_e_cie1976
+from colormath.color_conversions import convert_color
 
 def AWB_RGB(image, awbParam):
     """
@@ -255,9 +259,9 @@ class CCM_3x3:
         x = self.ccm.flatten()  # 初始猜测值
 
 
-        C = np.zeros((3, 9))
+        Cons1 = np.zeros((3, 9))
         for i in range(3):
-            C[i, 3*i : 3*i+3] = 1  # 每行对应矩阵M的一行的3个元素
+            Cons1[i, 3*i : 3*i+3] = 1  # 每行对应矩阵M的一行的3个元素
         
         # Cin=np.zeros((1, 9))
         # Cin[0, 4]=-1
@@ -267,15 +271,14 @@ class CCM_3x3:
         # 约束条件: CCM矩阵的每一行之和为1
         constraints.append( {
             'type': 'eq', 
-            'fun': lambda x: C @ x - np.ones(3),
+            'fun': lambda x: Cons1 @ x - np.ones(3),
         } )
-        
-        # constraints.append( {
+            # constraints.append( {
         #     'type': 'ineq', 
         #     'fun': lambda x: Cin @ x,
         # } )
         '''=====================最小二乘============================='''
-        from scipy.optimize import least_squares
+        # from scipy.optimize import least_squares
 
         # 假设你的 self.loss 函数返回残差（residuals）而不是标量损失值
         # result = least_squares(
@@ -294,6 +297,7 @@ class CCM_3x3:
             x,  
             args=(self.input, self.output),
             constraints=constraints,
+
             # bounds=bounds,
             method='SLSQP',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
             options={'maxiter': 100000,'rhobeg': 1.0, 'rhoend': 1e-12,'disp': False}
@@ -464,7 +468,8 @@ IDEAL_RGB = np.array([
       [0.324	,0.33	,0.336],
       [0.191	,0.194	,0.199],
     ])  
-IDEAL_LINEAR_RGB = reverseGamma(IDEAL_RGB) # 逆Gamma处理后的理想RGB值
+# IDEAL_LINEAR_RGB = reverseGamma(IDEAL_RGB) # 逆Gamma处理后的理想RGB值
+IDEAL_LINEAR_RGB = reverseGamma(IDEAL_COLORCHECKER_RGB) # 逆Gamma处理后的理想RGB值
 def ccmApply_3x4(img,ccm):
     # 3. 应用CCM矫正（使用左乘）
     h, w = img.shape[:2] #H*W*3
@@ -505,7 +510,33 @@ def calColorError(img,area):
     error = np.mean(sumTmp)  # MSE误差
     # error=np.sqrt(np.sum((avg_colors - IDEAL_LINEAR_RGB)**2,axis=1))
     return error
+def calColorErrorE2000(img, area):
+    """计算色块与理想颜色的 CIE 2000 Delta E 差异"""
+    avg_colors = []
+    for (x1, y1, x2, y2) in area:
+        patch = img[y1:y2, x1:x2]
+        R_mean = np.mean(patch[:, :, 0])  # 注意：OpenCV 默认是 BGR，这里假设你的 img 是 RGB
+        G_mean = np.mean(patch[:, :, 1])
+        B_mean = np.mean(patch[:, :, 2])
+        avg_colors.append([R_mean, G_mean, B_mean])
+    
+    # 转换为 sRGBColor 对象（需归一化到 0-1）
+    avg_colors = np.array(avg_colors)   # 假设输入是 0-255
+    ideal_rgb = np.array(IDEAL_RGB)     # 理想颜色也需归一化
 
+    # 计算每个色块的 Delta E 2000
+    delta_es = []
+    for rgb,target_rgb in zip(avg_colors,IDEAL_RGB):
+        # 创建颜色对象（sRGB → Lab）
+        color = sRGBColor(rgb[0], rgb[1], rgb[2], is_upscaled=True)
+        target = sRGBColor(target_rgb[0], target_rgb[1], target_rgb[2], is_upscaled=True)
+        color_lab = convert_color(color, LabColor)
+        target_lab = convert_color(target, LabColor)
+        
+        # 计算 Delta E 2000
+        delta_es.append(delta_e_cie2000(color_lab, target_lab))
+    print(f"delta_es: {delta_es}...")
+    return np.sum(delta_es)
 def timeit(func):
     start_time = time.time()
     call_count = 0
