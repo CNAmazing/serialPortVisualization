@@ -67,6 +67,8 @@ def getCTstr(file_path):
         return 'D60'
     elif 'D65' in file_path:
         return 'D65'
+    elif 'H' in file_path:
+        return 'H'
 def get_paths(folder_name, suffix=".csv"):
     """
     递归获取指定文件夹及其子目录中的所有suffix图片路径及不带后缀的文件名
