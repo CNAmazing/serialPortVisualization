@@ -1,11 +1,12 @@
 import sys
 import os
-from scipy.optimize import minimize, curve_fit
+from scipy.optimize import minimize, curve_fit,least_squares
 import cv2
 import numpy as np
 from tools import *
 from skimage.color import rgb2lab
-
+from deap import base, creator, tools, algorithms
+from functools import partial
 import time
 from functools import wraps
 from colormath.color_objects import LabColor, sRGBColor
@@ -262,20 +263,17 @@ class CCM_3x3_6variables:
         # predicted=np.dot(ccm,input)  # 应用颜色校正
         predicted=np.dot(ccm,input)  # 应用颜色校正
 
-        # labPredicted= rgb_to_lab(predicted.T)  # 转换为Lab颜色空间
-        # labOutput = rgb_to_lab(output.T)  # 转换为Lab颜色空间
-        # labPredicted=labPredicted.T
-        # labOutput=labOutput.T
+        labPredicted= rgb_to_lab(predicted.T)  # 转换为Lab颜色空间
+        labOutput = rgb_to_lab(output.T)  # 转换为Lab颜色空间
+        labPredicted=labPredicted.T
+        labOutput=labOutput.T
         # sumTmp=np.sum((labPredicted - labOutput)**2,axis=0)
  
-        sumTmp=np.sum((predicted - output)**2,axis=0)
-        # print('sumTmp',sumTmp)
-        # sumTmp[1]*=3
-        # sumTmp[23]*=3
-        error = np.mean(sumTmp)  # MSE误差
+        # sumTmp=np.sum((predicted - output)**2,axis=0)
+        # error = np.mean(sumTmp)  # MSE误差
         # print(f"error:{error}")
-        # return((labPredicted - labOutput)**2).flatten()
-        return error
+        return((labPredicted - labOutput)**2).flatten()
+        # return error
 
     def infer_image(self):
         ccm_six= self.ccm[:, :2].flatten()
@@ -292,27 +290,27 @@ class CCM_3x3_6variables:
         # from scipy.optimize import least_squares
 
         # 假设你的 self.loss 函数返回残差（residuals）而不是标量损失值
-        # result = least_squares(
-        #     self.loss,  # 这个函数现在应该返回残差向量而不是标量
-        #     x,
-        #     args=(self.input, self.output),
-        #     # bounds=bounds,  # least_squares 支持 bounds
-        #     method='trf',  # 或 'lm'（Levenberg-Marquardt，无约束时使用）
-        #     max_nfev=100000,
-        #     verbose=2
-        # )
+        result = least_squares(
+            self.loss,  # 这个函数现在应该返回残差向量而不是标量
+            x,
+            args=(self.input, self.output),
+            # bounds=bounds,  # least_squares 支持 bounds
+            method='trf',  # 或 'lm'（Levenberg-Marquardt，无约束时使用）
+            max_nfev=100000,
+            verbose=0
+        )
         '''=====================能量项优化============================='''
         # bounds = [(-4, 4) for _ in range(9)]
-        result = minimize(
-            self.loss,  # 包装loss函数
-            x,  
-            args=(self.input, self.output),
-            # constraints=self.constraints,
+        # result = minimize(
+        #     self.loss,  # 包装loss函数
+        #     x,  
+        #     args=(self.input, self.output),
+        #     # constraints=self.constraints,
 
-            # bounds=bounds,
-            method='L-BFGS-B',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
-            options={'maxiter': 100000,'rhobeg': 1.0, 'rhoend': 1e-9,'disp': False}
-        )
+        #     # bounds=bounds,
+        #     method='L-BFGS-B',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
+        #     options={'maxiter': 100000,'rhobeg': 1.0, 'rhoend': 1e-9,'disp': False}
+        # )
         # 打印优化结果的详细信息
   
 
@@ -521,12 +519,59 @@ def Gamma(img):
     mask = img <= 0.0031308
     img = np.where(mask, img * 12.92, 1.055 * (img ** GAMMA_EXP) - 0.055)
     return img
-    # img_encoded = cv2.imread(folderPath)
-    # mask = img <= 0.0031308
-    # srgb = np.zeros_like(img)
-    # srgb[mask] = img[mask] * 12.92
-    # srgb[~mask] = 1.055 * (img[~mask] ** (1/2.4)) - 0.055
-    # return srgb
+def evaluate_transform(individual,matrix1,matrix2):
+    """评估3×3变换矩阵的适应度"""
+    transform_matrix = np.array(individual).reshape(3, 3)
+    predicted = np.dot(matrix1, transform_matrix.T)
+    # 计算每一行的RMSE然后求和
+    row_errors = np.sqrt(np.mean((predicted - matrix2)**2, axis=1))
+    total_error = np.sum(row_errors)
+    return total_error,
+
+# 3. 遗传算法实现
+def run_ga(matrix1, matrix2, n_pop=100, n_gen=500, cxpb=0.7, mutpb=0.2):
+    # 创建类型（如果尚未创建）
+    if not hasattr(creator, "FitnessMin"):
+        creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
+    if not hasattr(creator, "Individual"):
+        creator.create("Individual", list, fitness=creator.FitnessMin)
+    
+    toolbox = base.Toolbox()
+    # 3×3矩阵有9个元素，每个元素在[-5,5]范围内
+    toolbox.register("attr_float", np.random.uniform, -4, 4)
+    toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, n=9)
+    toolbox.register("population", tools.initRepeat, list, toolbox.individual, n=n_pop)
+
+    # 关键修改：使用partial绑定matrix1和matrix2到评估函数
+    toolbox.register("evaluate", partial(evaluate_transform, matrix1=matrix1, matrix2=matrix2))
+    
+    toolbox.register("mate", tools.cxBlend, alpha=0.5)
+    toolbox.register("mutate", tools.mutGaussian, mu=0, sigma=0.5, indpb=0.2)
+    toolbox.register("select", tools.selTournament, tournsize=3)
+
+    pop = toolbox.population(n=n_pop)
+    hof = tools.HallOfFame(1)
+    stats = tools.Statistics(lambda ind: ind.fitness.values[0])
+    stats.register("avg", np.mean)
+    stats.register("min", np.min)
+    
+    logbook = tools.Logbook()
+    logbook.header = ['gen', 'min', 'avg']
+    
+    for gen in range(n_gen):
+        pop = algorithms.varAnd(pop, toolbox, cxpb=cxpb, mutpb=mutpb)
+        fits = toolbox.map(toolbox.evaluate, pop)  # 这里会自动传递individual
+        for fit, ind in zip(fits, pop):
+            ind.fitness.values = fit
+        
+        hof.update(pop)
+        record = stats.compile(pop)
+        logbook.record(gen=gen, **record)
+        pop = toolbox.select(pop, k=len(pop))
+
+    best_matrix = np.array(hof[0]).reshape(3, 3)
+    best_error = evaluate_transform(hof[0], matrix1, matrix2)[0]  # 注意这里也要传参数
+    return best_matrix, best_error, logbook 
 ColorCheckerRGB= np.array([
     [110.32,  75.67,  62.16],
     [194.341, 144.622,  127.28],
@@ -711,8 +756,10 @@ def autoFitAwb(image_folder):
         color_means= calColor(imgTmp,area)
         # print(f"计算的色块平均RGB值: {color_means}...")
         # ccmCalib= CCM_3x4(color_means, IDEAL_LINEAR_RGB) 
-        ccmCalib= CCM_3x3_6variables(color_means, IDEAL_LINEAR_RGB) 
-        ccm= ccmCalib.infer_image()
+        ccm, best_error, logbook = run_ga(color_means, IDEAL_LINEAR_RGB)
+
+        # ccmCalib= CCM_3x3_6variables(color_means, IDEAL_LINEAR_RGB) 
+        # ccm= ccmCalib.infer_image()
         # imgTmp= ccmApply_3x4(imgTmp,ccm)
         imgTmp= ccmApply(imgTmp,ccm)
         imgTmp= Gamma(imgTmp)
