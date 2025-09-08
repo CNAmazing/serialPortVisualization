@@ -222,6 +222,109 @@ def ccmApply(img,ccm):
     rgb_flat = rgb_flat.reshape(h, w, 3)
     # 5. 裁剪并转换到8位
     return rgb_flat
+class CCM_3x3_6variables:
+    def __init__(self,input,output):
+        self.input = input
+        self.output = output
+        # self.ccm = np.ones(3, 3)  # 初始化为单位矩阵
+        self.ccm = np.eye(3)  # 初始化为单位矩阵
+        
+        # 仅用shape进行判断
+        if input.shape != output.shape:
+            raise ValueError("input和output的形状必须相同")
+        if input.shape[1] != 3:
+            raise ValueError("最后一个维度必须是RGB颜色")
+        self.m, self.n = input.shape[:2]  # 获取输入图像的形状
+
+        Cons1 = np.zeros((3, 9))
+        for i in range(3):
+            Cons1[i, 3*i : 3*i+3] = 1  # 每行对应矩阵M的一行的3个元素
+        
+        # Cin=np.zeros((1, 9))
+        # Cin[0, 4]=-1
+        # Cin[0, 8]=1
+
+        self.constraints = []
+        # 约束条件: CCM矩阵的每一行之和为1
+        self.constraints.append( {
+            'type': 'eq', 
+            'fun': lambda x: Cons1 @ x - np.ones(3),
+        } )
+    def loss(self, x, input, output):
+        input=input.T
+        output=output.T
+        # print(input.shape,output.shape)
+        ccm=np.zeros((3,3))
+        ccm[:,:2]= x.reshape(3,2)
+        ccm[:,2]= 1-ccm[:,0]-ccm[:,1]
+        # print('ccm',ccm)
+        # ccm = x.reshape(3, 3)  # 将扁平化的参数恢复为3x3矩阵
+        # predicted=np.dot(ccm,input)  # 应用颜色校正
+        predicted=np.dot(ccm,input)  # 应用颜色校正
+
+        # labPredicted= rgb_to_lab(predicted.T)  # 转换为Lab颜色空间
+        # labOutput = rgb_to_lab(output.T)  # 转换为Lab颜色空间
+        # labPredicted=labPredicted.T
+        # labOutput=labOutput.T
+        # sumTmp=np.sum((labPredicted - labOutput)**2,axis=0)
+ 
+        sumTmp=np.sum((predicted - output)**2,axis=0)
+        # print('sumTmp',sumTmp)
+        # sumTmp[1]*=3
+        # sumTmp[23]*=3
+        error = np.mean(sumTmp)  # MSE误差
+        # print(f"error:{error}")
+        # return((labPredicted - labOutput)**2).flatten()
+        return error
+
+    def infer_image(self):
+        ccm_six= self.ccm[:, :2].flatten()
+        # print( '初始猜测值 ccm_six:',npToString(ccm_six) )
+        x = ccm_six  
+        
+
+       
+            # constraints.append( {
+        #     'type': 'ineq', 
+        #     'fun': lambda x: Cin @ x,
+        # } )
+        '''=====================最小二乘============================='''
+        # from scipy.optimize import least_squares
+
+        # 假设你的 self.loss 函数返回残差（residuals）而不是标量损失值
+        # result = least_squares(
+        #     self.loss,  # 这个函数现在应该返回残差向量而不是标量
+        #     x,
+        #     args=(self.input, self.output),
+        #     # bounds=bounds,  # least_squares 支持 bounds
+        #     method='trf',  # 或 'lm'（Levenberg-Marquardt，无约束时使用）
+        #     max_nfev=100000,
+        #     verbose=2
+        # )
+        '''=====================能量项优化============================='''
+        # bounds = [(-4, 4) for _ in range(9)]
+        result = minimize(
+            self.loss,  # 包装loss函数
+            x,  
+            args=(self.input, self.output),
+            # constraints=self.constraints,
+
+            # bounds=bounds,
+            method='L-BFGS-B',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
+            options={'maxiter': 100000,'rhobeg': 1.0, 'rhoend': 1e-9,'disp': False}
+        )
+        # 打印优化结果的详细信息
+  
+
+        # 将优化结果恢复为CCM矩阵
+        optimized_ccm = result.x.reshape(3, 2)
+        optimized_ccm_full=np.zeros((3,3))
+        optimized_ccm_full[:,:2]= optimized_ccm
+        optimized_ccm_full[:,2]= 1-optimized_ccm_full[:,0]-optimized_ccm_full[:,1]
+        # print("===ccm===\n",npToString(optimized_ccm))
+
+        return optimized_ccm_full
+    
 class CCM_3x3:
     def __init__(self,input,output):
         self.input = input
@@ -608,7 +711,7 @@ def autoFitAwb(image_folder):
         color_means= calColor(imgTmp,area)
         # print(f"计算的色块平均RGB值: {color_means}...")
         # ccmCalib= CCM_3x4(color_means, IDEAL_LINEAR_RGB) 
-        ccmCalib= CCM_3x3(color_means, IDEAL_LINEAR_RGB) 
+        ccmCalib= CCM_3x3_6variables(color_means, IDEAL_LINEAR_RGB) 
         ccm= ccmCalib.infer_image()
         # imgTmp= ccmApply_3x4(imgTmp,ccm)
         imgTmp= ccmApply(imgTmp,ccm)
@@ -623,8 +726,8 @@ def autoFitAwb(image_folder):
     yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0901lscConfig2'
     # area=[[397, 493, 547, 643], [702, 493, 852, 643], [1007, 493, 1157, 643], [1312, 493, 1462, 643], [1617, 493, 1767, 643], [1922, 493, 2072, 643], [397, 798, 547, 948], [702, 798, 852, 948], [1007, 798, 1157, 948], [1312, 798, 1462, 948], [1617, 798, 1767, 948], [1922, 798, 2072, 948], [397, 1103, 547, 1253], [702, 1103, 852, 1253], [1007, 1103, 1157, 1253], [1312, 1103, 1462, 1253], [1617, 1103, 1767, 1253], [1922, 1103, 2072, 1253], [397, 1408, 547, 1558], [702, 1408, 852, 1558], [1007, 1408, 1157, 1558], [1312, 1408, 1462, 1558], [1617, 1408, 1767, 1558], [1922, 1408, 2072, 1558]]
     # area=[[320, 410, 470, 560], [640, 410, 790, 560], [960, 410, 1110, 560], [1280, 410, 1430, 560], [1600, 410, 1750, 560], [1920, 410, 2070, 560], [320, 730, 470, 880], [640, 730, 790, 880], [960, 730, 1110, 880], [1280, 730, 1430, 880], [1600, 730, 1750, 880], [1920, 730, 2070, 880], [320, 1050, 470, 1200], [640, 1050, 790, 1200], [960, 1050, 1110, 1200], [1280, 1050, 1430, 1200], [1600, 1050, 1750, 1200], [1920, 1050, 2070, 1200], [320, 1370, 470, 1520], [640, 1370, 790, 1520], [960, 1370, 1110, 1520], [1280, 1370, 1430, 1520], [1600, 1370, 1750, 1520], [1920, 1370, 2070, 1520]]
-    # area=[[710, 471, 840, 601], [965, 471, 1095, 601], [1220, 471, 1350, 601], [1475, 471, 1605, 601], [1730, 471, 1860, 601], [1985, 471, 2115, 601], [710, 726, 840, 856], [965, 726, 1095, 856], [1220, 726, 1350, 856], [1475, 726, 1605, 856], [1730, 726, 1860, 856], [1985, 726, 2115, 856], [710, 981, 840, 1111], [965, 981, 1095, 1111], [1220, 981, 1350, 1111], [1475, 981, 1605, 1111], [1730, 981, 1860, 1111], [1985, 981, 2115, 1111], [710, 1236, 840, 1366], [965, 1236, 1095, 1366], [1220, 1236, 1350, 1366], [1475, 1236, 1605, 1366], [1730, 1236, 1860, 1366], [1985, 1236, 2115, 1366]]
-    area=[[385, 490, 495, 600], [695, 490, 805, 600], [1005, 490, 1115, 600], [1315, 490, 1425, 600], [1625, 490, 1735, 600], [1935, 490, 2045, 600], [385, 800, 495, 910], [695, 800, 805, 910], [1005, 800, 1115, 910], [1315, 800, 1425, 910], [1625, 800, 1735, 910], [1935, 800, 2045, 910], [385, 1110, 495, 1220], [695, 1110, 805, 1220], [1005, 1110, 1115, 1220], [1315, 1110, 1425, 1220], [1625, 1110, 1735, 1220], [1935, 1110, 2045, 1220], [385, 1420, 495, 1530], [695, 1420, 805, 1530], [1005, 1420, 1115, 1530], [1315, 1420, 1425, 1530], [1625, 1420, 1735, 1530], [1935, 1420, 2045, 1530]]
+    area=[[710, 471, 840, 601], [965, 471, 1095, 601], [1220, 471, 1350, 601], [1475, 471, 1605, 601], [1730, 471, 1860, 601], [1985, 471, 2115, 601], [710, 726, 840, 856], [965, 726, 1095, 856], [1220, 726, 1350, 856], [1475, 726, 1605, 856], [1730, 726, 1860, 856], [1985, 726, 2115, 856], [710, 981, 840, 1111], [965, 981, 1095, 1111], [1220, 981, 1350, 1111], [1475, 981, 1605, 1111], [1730, 981, 1860, 1111], [1985, 981, 2115, 1111], [710, 1236, 840, 1366], [965, 1236, 1095, 1366], [1220, 1236, 1350, 1366], [1475, 1236, 1605, 1366], [1730, 1236, 1860, 1366], [1985, 1236, 2115, 1366]]
+    # area=[[385, 490, 495, 600], [695, 490, 805, 600], [1005, 490, 1115, 600], [1315, 490, 1425, 600], [1625, 490, 1735, 600], [1935, 490, 2045, 600], [385, 800, 495, 910], [695, 800, 805, 910], [1005, 800, 1115, 910], [1315, 800, 1425, 910], [1625, 800, 1735, 910], [1935, 800, 2045, 910], [385, 1110, 495, 1220], [695, 1110, 805, 1220], [1005, 1110, 1115, 1220], [1315, 1110, 1425, 1220], [1625, 1110, 1735, 1220], [1935, 1110, 2045, 1220], [385, 1420, 495, 1530], [695, 1420, 805, 1530], [1005, 1420, 1115, 1530], [1315, 1420, 1425, 1530], [1625, 1420, 1735, 1530], [1935, 1420, 2045, 1530]]
     for path,basename in zip(full_paths,basenames):
         keyCT= getCTstr(path)
        

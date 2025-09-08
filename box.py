@@ -2,7 +2,7 @@ import cv2
 import matplotlib.pyplot as plt
 
 # 1. 读取一张图像
-image = cv2.imread(r'C:\WorkSpace\serialPortVisualization\data\g07s5ColorChecker\demosaicResults2\A.jpg')
+image = cv2.imread(r'C:\WorkSpace\serialPortVisualization\data\g07s5ColorChecker\demosaicResults\A.jpg')
 
 # 将BGR格式转换为RGB格式（Matplotlib使用RGB）
 image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
