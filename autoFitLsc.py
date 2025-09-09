@@ -12,6 +12,28 @@ from functools import wraps
 from colormath.color_objects import LabColor, sRGBColor
 from colormath.color_diff import delta_e_cie2000, delta_e_cie1976
 from colormath.color_conversions import convert_color
+import bm3d
+
+def bm3d_denoise(img_float, sigma=30, stage_arg=bm3d.BM3DStages.HARD_THRESHOLDING):
+    """
+    使用BM3D算法进行10位精度图像去噪
+    :param img_float: 输入图像，应为10位精度的浮点型数组 (范围0-1023)
+    :param sigma: 噪声标准差估计 (基于10位范围)
+    :param stage_arg: 处理阶段 (HARD_THRESHOLDING 或 ALL_STAGES)
+    :return: 去噪后的10位图像 (范围0-1023)
+    """
+    # 将10位图像归一化到[0,1]范围
+    img_normalized = img_float.astype(np.float32) / 1023.0
+    
+    # 使用BM3D去噪 (sigma_psd需要相应调整)
+    denoised_img = bm3d.bm3d(img_normalized, 
+                             sigma_psd=sigma/1023,  # 噪声标准差相对于10位范围
+                             stage_arg=stage_arg)
+    
+    # 转换回10位图像
+    denoised_img = np.clip(denoised_img * 1023, 0, 1023).astype(np.uint16)
+    
+    return denoised_img
 
 def AWB_RGB(image, awbParam):
     """
@@ -527,8 +549,26 @@ def evaluate_transform(individual,matrix1,matrix2):
     row_errors = np.sqrt(np.mean((predicted - matrix2)**2, axis=1))
     total_error = np.sum(row_errors)
     return total_error,
-
+def timeit(func):
+    start_time = time.time()
+    call_count = 0
+    
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        
+        result = func(*args, **kwargs)
+        
+        elapsed = time.time() - start_time
+        avg_time = elapsed / call_count if call_count > 0 else 0
+        print(f"   [{call_count}] 总耗时: {elapsed:.2f}s, 平均耗时: {avg_time:.2f}s")
+        
+        return result
+    
+    return wrapper
 # 3. 遗传算法实现
+@timeit
 def run_ga(matrix1, matrix2, n_pop=100, n_gen=500, cxpb=0.7, mutpb=0.2):
     # 创建类型（如果尚未创建）
     if not hasattr(creator, "FitnessMin"):
@@ -719,24 +759,7 @@ def calColorErrorE2000(img, area):
         delta_es.append(delta_e_cie2000(color_lab, target_lab))
     print(f"delta_es: {delta_es}...")
     return np.sum(delta_es)
-def timeit(func):
-    start_time = time.time()
-    call_count = 0
-    
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        
-        result = func(*args, **kwargs)
-        
-        elapsed = time.time() - start_time
-        avg_time = elapsed / call_count if call_count > 0 else 0
-        print(f"   [{call_count}] 总耗时: {elapsed:.2f}s, 平均耗时: {avg_time:.2f}s")
-        
-        return result
-    
-    return wrapper
+
 def autoFitAwb(image_folder):
     
     @timeit
@@ -889,45 +912,48 @@ def autoFitAwb(image_folder):
         print(f"最佳awb参数: {bestParam}, 最小色彩误差: {minError},最佳CCM:\n{npToString(bestCCM)}")    
 def autoFitLsc(image_folder):
 
-    full_paths, basenames = get_paths(image_folder,suffix=".pgm")
-    Rrange= np.arange(0.95, 1, 0.01)  
-    Brange= np.arange(1.7, 1.8, 0.01)  
+    full_paths, basenames = get_paths(image_folder,suffix=".raw")
+    Rrange= np.arange(0.8, 1.8, 0.15)  
+    Brange= np.arange(1.2, 1.8, 0.15)  
 
     yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0901lscConfig2'
-    area=[[400, 481, 550, 631], [710, 481, 860, 631], [1020, 481, 1170, 631], [1330, 481, 1480, 631], [1640, 481, 1790, 631], [1950, 481, 2100, 631], [400, 791, 550, 941], [710, 791, 860, 941], [1020, 791, 1170, 941], [1330, 791, 1480, 941], [1640, 791, 1790, 941], [1950, 791, 2100, 941], [400, 1101, 550, 1251], [710, 1101, 860, 1251], [1020, 1101, 1170, 1251], [1330, 1101, 1480, 1251], [1640, 1101, 1790, 1251], [1950, 1101, 2100, 1251], [400, 1411, 550, 1561], [710, 1411, 860, 1561], [1020, 1411, 1170, 1561], [1330, 1411, 1480, 1561], [1640, 1411, 1790, 1561], [1950, 1411, 2100, 1561]]
+    area=[[710, 471, 840, 601], [965, 471, 1095, 601], [1220, 471, 1350, 601], [1475, 471, 1605, 601], [1730, 471, 1860, 601], [1985, 471, 2115, 601], [710, 726, 840, 856], [965, 726, 1095, 856], [1220, 726, 1350, 856], [1475, 726, 1605, 856], [1730, 726, 1860, 856], [1985, 726, 2115, 856], [710, 981, 840, 1111], [965, 981, 1095, 1111], [1220, 981, 1350, 1111], [1475, 981, 1605, 1111], [1730, 981, 1860, 1111], [1985, 981, 2115, 1111], [710, 1236, 840, 1366], [965, 1236, 1095, 1366], [1220, 1236, 1350, 1366], [1475, 1236, 1605, 1366], [1730, 1236, 1860, 1366], [1985, 1236, 2115, 1366]]
+
     for path,basename in zip(full_paths,basenames):
         keyCT= getCTstr(path)
        
         print(f"Processing image: {path},colorTemp:{keyCT}...")   
         # yaml_file = fr'C:\serialPortVisualization\data\0815_1_Config\isp_sensor_raw{keyCT}.yaml'
         # yaml_file = ''
-        yaml_files,_= get_paths(yamlFolder,suffix=".yaml")
-        for yf in yaml_files:
-            if keyCT in yf:
-                yaml_file=yf
-                break
-        if yaml_file == '':
-            print(f"未找到对应的yaml文件，跳过处理: {keyCT}")
-            continue
-        print(f"Using yaml file: {yaml_file}...")
-        dataYaml = loadYaml(yaml_file)
-        gainList=[]
+        # yaml_files,_= get_paths(yamlFolder,suffix=".yaml")
+        # for yf in yaml_files:
+        #     if keyCT in yf:
+        #         yaml_file=yf
+        #         break
+        # if yaml_file == '':
+        #     print(f"未找到对应的yaml文件，跳过处理: {keyCT}")
+        #     continue
+        # print(f"Using yaml file: {yaml_file}...")
+        # dataYaml = loadYaml(yaml_file)
+        # gainList=[]
         
-        mesh_R = np.array(dataYaml['R'])
-        mesh_Gr = np.array(dataYaml['Gr'])
-        mesh_Gb = np.array(dataYaml['Gb'])
-        mesh_B = np.array(dataYaml['B'])
+        # mesh_R = np.array(dataYaml['R'])
+        # mesh_Gr = np.array(dataYaml['Gr'])
+        # mesh_Gb = np.array(dataYaml['Gb'])
+        # mesh_B = np.array(dataYaml['B'])
 
 
-        gainList.append(mesh_R)
-        gainList.append(mesh_Gr)
-        gainList.append(mesh_Gb)
-        gainList.append(mesh_B)
+        # gainList.append(mesh_R)
+        # gainList.append(mesh_Gr)
+        # gainList.append(mesh_Gb)
+        # gainList.append(mesh_B)
    
-        img = read_pgm_with_opencv(path)
+        # img = read_pgm_with_opencv(path)
+        img = readRaw(path,h=1944,w=2592) 
         print(f"图像尺寸: {img.shape},数据类型: {img.dtype},最小值: {img.min()}, 最大值: {img.max()},均值_10bit:{img.mean()},均值_8bit:{img.mean()/1023*255}")  # (高度, 宽度)
-        img= BLC(img,blcParam=16)
-        imgLSC=LSC(img,gainList,strength=[0.5,0.5,0.5,0.5])
+        imgLSC= BLC(img,blcParam=64)
+        # imgLSC=LSC(img,gainList,strength=[0.5,0.5,0.5,0.5])
+        imgLSC=bm3d_denoise(imgLSC)
         minError=float('inf')
         bestParam=None
         bestCCM=None
@@ -937,7 +963,7 @@ def autoFitLsc(image_folder):
         for rGain in Rrange:
             for bGain in Brange:
                     awbParam=[bGain,1,1,rGain]
-                    print(f"tring awb Param:R_{rGain:.2f}, B_{bGain:.2f}")
+                    print(f"tring awb Param:R_{rGain:.2f}, B_{bGain:.2f}",end=' ')
                     # awbParam=AWBList[keyCT]
                     # print(imgLSC[0:4,0:4])
 
@@ -951,8 +977,10 @@ def autoFitLsc(image_folder):
                     color_means= calColor(imgTmp,area)
                     # print(f"计算的色块平均RGB值: {color_means}...")
                     # ccmCalib= CCM_3x4(color_means, IDEAL_LINEAR_RGB) 
-                    ccmCalib= CCM_3x3(color_means, IDEAL_LINEAR_RGB) 
-                    ccm= ccmCalib.infer_image()
+                    # ccmCalib= CCM_3x3(color_means, IDEAL_LINEAR_RGB) 
+                    # ccm= ccmCalib.infer_image()
+                    ccm, best_error, logbook = run_ga(color_means, IDEAL_LINEAR_RGB)
+
                     # imgTmp= ccmApply_3x4(imgTmp,ccm)
                     imgTmp= ccmApply(imgTmp,ccm)
                     
@@ -991,7 +1019,7 @@ def main():
         sys.exit(1)
     
     folderPath = sys.argv[1]
-    # autoFitLsc(folderPath)
-    autoFitAwb(folderPath)
+    autoFitLsc(folderPath)
+    # autoFitAwb(folderPath)
 
 main()
