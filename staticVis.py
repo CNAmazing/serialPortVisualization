@@ -4,7 +4,7 @@ import numpy as np
 import os
 import re
 from collections import defaultdict
-def read_and_split_by_equal(filename):
+def read_and_split_by_equal1(filename):
     """
     读取txt文件并按等号分割每行内容
     
@@ -31,6 +31,50 @@ def read_and_split_by_equal(filename):
                     result.append((key, value))
                 else:
                     print(f"警告: 行 '{line}' 不包含等号，已跳过")
+        return result
+    except FileNotFoundError:
+        print(f"错误: 文件 {filename} 未找到")
+        return None
+    except Exception as e:
+        print(f"读取文件时发生错误: {e}")
+        return None
+def read_and_split_by_equal(filename):
+    """
+    读取日志文件并按等号分割每行内容，处理带有时间戳和前缀的格式
+    
+    参数:
+        filename: 要读取的txt文件路径
+        
+    返回:
+        包含分割后内容的列表，每个元素是一个(key, value)元组
+    """
+    result = []
+    try:
+        with open(filename, 'r', encoding='utf-8') as file:
+            for line in file:
+                # 去除行首尾的空白字符
+                line = line.strip()
+                # 跳过空行和注释行(以#开头的行)
+                if not line or line.startswith('#'):
+                    continue
+                
+                # 处理带有时间戳和前缀的行
+                parts = line.split()
+                if len(parts) >= 5 and '=' in parts[-1]:
+                    # 最后一部分应该是 key=value
+                    key_value = parts[-1].split('=', 1)
+                    if len(key_value) == 2:
+                        key = key_value[0].strip()
+                        value = key_value[1].strip()
+                        result.append((key, value))
+                elif '=' in line:
+                    # 普通格式的处理（原逻辑）
+                    key, value = line.split('=', 1)  # 只分割第一个等号
+                    key = key.strip()
+                    value = value.strip()
+                    result.append((key, value))
+                else:
+                    print(f"警告: 行 '{line}' 不包含有效的键值对，已跳过")
         return result
     except FileNotFoundError:
         print(f"错误: 文件 {filename} 未找到")
@@ -91,7 +135,7 @@ def pltMultiImage(dataDict,tital='tital',isSavePltImage=False):
     plt.show()
 def singleDatInfer(file_path, title=None,isSavePltImage=False):
     parsed_data = read_and_split_by_equal(file_path)
-    keyList = ['curExposure','curGain','avgL_d']
+    keyList = ['curExposure','curGain','avgL']
     # keyList = ['curExposure','curGain','avgL_d','L','roundedCCT']
     # keyList = ['roundedCCT','isgainR','isgainG','isgainB',]
     # keyList = ['roundedCCT','noGainR','noGainG','noGainB',]
@@ -196,7 +240,7 @@ if __name__ == "__main__":
     """
     vis
     """
-    full_paths,basenames = get_paths(r"C:\serialPortVisualization\data\0811_5")
+    full_paths,basenames = get_paths(r"C:\serialPortVisualization\data\0908")
     for path, name in zip(full_paths, basenames):
         singleDatInfer(path,name,isSavePltImage=True)
 

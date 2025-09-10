@@ -3,7 +3,7 @@ from datetime import datetime
 import re 
 import matplotlib.pyplot as plt
 from adjustText import adjust_text
-
+import numpy as np
 # 初始化串口
 def serial_init(port, baudrate=115200, timeout=None):
     try:
@@ -28,15 +28,20 @@ def pltSaveFig(keyDict):
     # 存储所有标注对象
     texts = []
     now = datetime.now()
-    saveName=now.strftime("%Y_%m_%d_%H_%M_%S")
+    saveName=now.strftime("%Y%m%d_%H_%M_%S")
     # 绘制每条曲线，并添加标记
     for key, values in keyDict.items():
-        line = plt.plot(values, label=key, marker='o', markersize=8, linestyle='-')
+        if not values:
+            print(f"key={key}无数据，跳过......")
+            continue
+        values=np.array(values)
+        maxValue=np.max(values)
+        line = plt.plot(values/maxValue, label=key, marker='o', markersize=3, linestyle='-')
         for i, v in enumerate(values):
             # 添加标注到列表（暂不显示）
-            texts.append(plt.text(i, v, f'({i}, {v})', fontsize=8, ha='center', va='bottom'))
+            texts.append(plt.text(i, v/maxValue, f'({i:.1f}, {v:.1f})', fontsize=2, ha='center', va='bottom'))
 
-    # 自动调整标注位置（避免重叠）
+    
     adjust_text(
         texts, 
         # arrowprops=dict(arrowstyle='->', lw=0.5, color='gray'),  # 箭头样式
@@ -46,17 +51,17 @@ def pltSaveFig(keyDict):
         # force_points=0.5            # 调整文本与点的排斥力
     )
 
-    # 添加图例、标题、坐标轴标签
+    
     plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
     plt.title(f"{saveName}")
     plt.xlabel("Frame Index")
     plt.ylabel("Value")
 
-    # 调整布局并保存
     plt.tight_layout()
-    plt.savefig(f"{saveName}.png", dpi=300, bbox_inches='tight')
+    plt.savefig(f"{saveName}.svg", dpi=300, bbox_inches='tight',format='svg')
     # plt.show()
-    
+def processDict(keyDict):
+    return keyDict
 def main():
     keyDict={
         'curGain':[],
@@ -64,9 +69,13 @@ def main():
         "curExposure":[],
         "newExposure":[],
         "avgL_d":[],
+        "avgL":[],
+        "roundedCCT":[],
     }
-    endFlag=r"mediax save dng metadata success"
-    ser = serial_init('COM3', 2000000)  # 修改为你的串口号和波特率
+    captureEndFlag=r"mediax save dng metadata success"
+    videoEndFlag=r"mediax_transmit_stop succeeded"
+    endFlag=f"{captureEndFlag}|{videoEndFlag}"
+    ser = serial_init('COM11', 2000000)  # 修改为你的串口号和波特率
     try:
         print("开始接收数据(按Ctrl+C停止)...")
         while True:
@@ -77,15 +86,18 @@ def main():
                     line = data.decode('utf-8', errors='ignore').strip()
                     if line:  # 只打印非空行
                         # 使用正则表达式匹配等号前后的内容
-                        endMatch=re.search(endFlag, line)
+                        print(f"{line}")
+
+                        endMatch=re.search(videoEndFlag, line)
                         if endMatch:
-                            print("接收结束，保存图片...")
+                            print("接收结束，保存...")
+
                             pltSaveFig(keyDict)
                             for k in keyDict:
                                 keyDict[k].clear()
                             print("继续接收数据...")
                             continue
-                        match = re.search(r'([^\s=]+)\s*=\s*([^\s=]+)', line)
+                        match = re.search(r'([^\s=,]+)\s*=\s*([^\s=,]+)', line) 
                         if match:
                             # 如果匹配成功，提取键值对
                             key = match.group(1)
@@ -95,9 +107,7 @@ def main():
                                     keyDict[key].append(float(value))
                                 except ValueError:
                                     print(f"无法将值转换为浮点数: {value}")
-                        else:
-                            # 如果没有等号，正常打印
-                            print(f"{line}")
+                        
                 except UnicodeDecodeError:
                     print(f"接收非文本数据: {data}")
                     
