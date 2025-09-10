@@ -13,8 +13,9 @@ from colormath.color_objects import LabColor, sRGBColor
 from colormath.color_diff import delta_e_cie2000, delta_e_cie1976
 from colormath.color_conversions import convert_color
 import bm3d
-
-def bm3d_denoise(img_float, sigma=30, stage_arg=bm3d.BM3DStages.HARD_THRESHOLDING):
+#stage_arg=bm3d.BM3DStages.HARD_THRESHOLDING
+#stage_arg=bm3d.BM3DStages.ALL_STAGES
+def bm3d_denoise(img_float, sigma=10, stage_arg=bm3d.BM3DStages.HARD_THRESHOLDING): #stage_arg=bm3d.BM3DStages.   ALL_STAGES     HARD_THRESHOLDING
     """
     使用BM3D算法进行10位精度图像去噪
     :param img_float: 输入图像，应为10位精度的浮点型数组 (范围0-1023)
@@ -779,10 +780,10 @@ def autoFitAwb(image_folder):
         color_means= calColor(imgTmp,area)
         # print(f"计算的色块平均RGB值: {color_means}...")
         # ccmCalib= CCM_3x4(color_means, IDEAL_LINEAR_RGB) 
-        ccm, best_error, logbook = run_ga(color_means, IDEAL_LINEAR_RGB)
+        # ccm, best_error, logbook = run_ga(color_means, IDEAL_LINEAR_RGB)
 
-        # ccmCalib= CCM_3x3_6variables(color_means, IDEAL_LINEAR_RGB) 
-        # ccm= ccmCalib.infer_image()
+        ccmCalib= CCM_3x3(color_means, IDEAL_LINEAR_RGB) 
+        ccm= ccmCalib.infer_image()
         # imgTmp= ccmApply_3x4(imgTmp,ccm)
         imgTmp= ccmApply(imgTmp,ccm)
         imgTmp= Gamma(imgTmp)
@@ -830,6 +831,7 @@ def autoFitAwb(image_folder):
         img = readRaw(path,h=1944,w=2592)  # 读取为numpy数组
         print(f"图像尺寸: {img.shape},数据类型: {img.dtype},最小值: {img.min()}, 最大值: {img.max()},均值_10bit:{img.mean()},均值_8bit:{img.mean()/1023*255}")  # (高度, 宽度)
         img= BLC(img,blcParam=64)
+        img=bm3d_denoise(img)
         # imgLSC=LSC(img,gainList,strength=[1,1,1,1])
         imgLSC=img
         minError=float('inf')
@@ -1019,7 +1021,7 @@ def main():
         sys.exit(1)
     
     folderPath = sys.argv[1]
-    autoFitLsc(folderPath)
-    # autoFitAwb(folderPath)
+    # autoFitLsc(folderPath)
+    autoFitAwb(folderPath)
 
 main()
