@@ -36,20 +36,23 @@ def pltSaveFig(keyDict):
             continue
         values=np.array(values)
         maxValue=np.max(values)
-        line = plt.plot(values/maxValue, label=key, marker='o', markersize=3, linestyle='-')
-        for i, v in enumerate(values):
-            # 添加标注到列表（暂不显示）
-            texts.append(plt.text(i, v/maxValue, f'({i:.1f}, {v:.1f})', fontsize=2, ha='center', va='bottom'))
-
+        line = plt.plot(values/maxValue, label=key, marker='o', markersize=2, linestyle='-')
+        if key=="avgL_d":
+            for i, v in enumerate(values):
+                texts.append(plt.text(i, v/maxValue, f'({i:.1f}, {v:.1f})', fontsize=2, ha='center', va='bottom'))
+        else:
+            for i, v in enumerate(values):
+                texts.append(plt.text(i, v/maxValue, f'({int(i)}, {int(v)})', fontsize=2, ha='center', va='bottom'))
+                
     
-    adjust_text(
-        texts, 
-        # arrowprops=dict(arrowstyle='->', lw=0.5, color='gray'),  # 箭头样式
-        # expand_points=(1.2, 1.2),  # 扩大标注移动范围
-        # expand_text=(1.2, 1.2),     # 扩大文本间距
-        # force_text=0.5,             # 调整文本间的排斥力
-        # force_points=0.5            # 调整文本与点的排斥力
-    )
+    # adjust_text(
+    #     texts, 
+    #     # arrowprops=dict(arrowstyle='->', lw=0.5, color='gray'),  # 箭头样式
+    #     # expand_points=(1.2, 1.2),  # 扩大标注移动范围
+    #     # expand_text=(1.2, 1.2),     # 扩大文本间距
+    #     # force_text=0.5,             # 调整文本间的排斥力
+    #     # force_points=0.5            # 调整文本与点的排斥力
+    # )
 
     
     plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
