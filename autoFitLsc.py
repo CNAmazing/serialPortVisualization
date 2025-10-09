@@ -13,8 +13,25 @@ from colormath.color_objects import LabColor, sRGBColor
 from colormath.color_diff import delta_e_cie2000, delta_e_cie1976
 from colormath.color_conversions import convert_color
 import bm3d
+from scipy.ndimage import median_filter
 #stage_arg=bm3d.BM3DStages.HARD_THRESHOLDING
 #stage_arg=bm3d.BM3DStages.ALL_STAGES
+def median_filter_NR(arr, size=5):
+    """
+    使用scipy实现中值滤波
+    
+    参数:
+    arr: 输入numpy数组
+    size: 滤波核大小（奇数）
+    
+    返回:
+    滤波后的数组
+    """
+    arr[::2, ::2] =median_filter(arr[::2, ::2], size=size)
+    arr[::2, 1::2] =median_filter(arr[::2, 1::2], size=size)
+    arr[1::2, ::2] =median_filter(arr[1::2, ::2], size=size)
+    arr[1::2, 1::2] =median_filter(arr[1::2, 1::2], size=size)
+    return arr
 def bm3d_denoise(img_float, sigma=10, stage_arg=bm3d.BM3DStages.HARD_THRESHOLDING): #stage_arg=bm3d.BM3DStages.   ALL_STAGES     HARD_THRESHOLDING
     """
     使用BM3D算法进行10位精度图像去噪
@@ -831,7 +848,8 @@ def autoFitAwb(image_folder):
         img = readRaw(path,h=1944,w=2592)  # 读取为numpy数组
         print(f"图像尺寸: {img.shape},数据类型: {img.dtype},最小值: {img.min()}, 最大值: {img.max()},均值_10bit:{img.mean()},均值_8bit:{img.mean()/1023*255}")  # (高度, 宽度)
         img= BLC(img,blcParam=64)
-        img=bm3d_denoise(img)
+        # img=bm3d_denoise(img)
+        img=median_filter_NR(img)
         # imgLSC=LSC(img,gainList,strength=[1,1,1,1])
         imgLSC=img
         minError=float('inf')

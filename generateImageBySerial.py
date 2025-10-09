@@ -78,7 +78,7 @@ def main():
     captureEndFlag=r"mediax save dng metadata success"
     videoEndFlag=r"mediax_transmit_stop succeeded"
     endFlag=f"{captureEndFlag}|{videoEndFlag}"
-    ser = serial_init('COM11', 2000000)  # 修改为你的串口号和波特率
+    ser = serial_init('COM3', 2000000)  # 修改为你的串口号和波特率
     try:
         print("开始接收数据(按Ctrl+C停止)...")
         while True:

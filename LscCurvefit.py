@@ -119,14 +119,11 @@ def generater2Center(x, y, m=24, n=32, center_x=0.5, center_y=0.5, asymmetry=1.0
     # Convert normalized center to grid coordinates
     center_x_grid = center_x * m
     center_y_grid = center_y * n
-    
     R2 = m * n / 4 * (1 + asymmetry * asymmetry)
-    
     # Calculate distance from (x,y) to the custom center
     dy = y - center_y_grid
     dx = (x - center_x_grid) * asymmetry
     r2 = (dx * dx + dy * dy) / R2
-    
     return r2
 def generate_lut(m: int, n: int,  ):
     """

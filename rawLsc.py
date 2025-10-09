@@ -1423,18 +1423,45 @@ def fitLscMatrixStrength(inputMatrix,outputMatrix):
     )
     strength=result.x[0]
     return strength
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python rawLsc.py <folder_path>")
-        sys.exit(1)
+import torch
+def fitLscMatrixStrengthTorch(inputMatrix, outputMatrix):
+    # 转换为 PyTorch tensor
+    input_tensor = torch.tensor(inputMatrix, dtype=torch.float32)
+    output_tensor = torch.tensor(outputMatrix, dtype=torch.float32)
     
-    folderPath = sys.argv[1]
+    # 定义可训练参数
+    strength = torch.tensor(1.0, requires_grad=True)
+    
+    # 定义优化器
+    optimizer = torch.optim.LBFGS([strength], lr=1.0, max_iter=10000, 
+                           tolerance_grad=1e-12, tolerance_change=1e-12)
+    
+    # 定义损失函数
+    def closure():
+        optimizer.zero_grad()
+        predict = (input_tensor - 1) * strength + 1
+        # loss = torch.nn.functional.l1_loss(predict, output_tensor)
+        loss = torch.nn.functional.mse_loss(predict, output_tensor)
+        loss.backward()
+        return loss.detach() 
+    
+    # 优化
+    optimizer.step(closure)
+    
+    return strength.item()
+
+def main():
+    # if len(sys.argv) != 2:
+    #     print("Usage: python rawLsc.py <folder_path>")
+    #     sys.exit(1)
+    
+    # folderPath = sys.argv[1]
     """"=============================标定代码============================="""
     # folder_path= r'C:\WorkSpace\serialPortVisualization\data\0822_LSC'
     # lenShadingCalibration(folder_path)
     # lenShadingCalibrationForRaw(folderPath,h=1944,w=2592)
     """"=============================应用代码============================="""
-    lenShadingCorrection(folderPath)
+    # lenShadingCorrection(folderPath)
     # awbSearch(folderPath)
 
     """=====================================pngLSC====================================="""
@@ -1471,9 +1498,11 @@ def main():
     # loadYamlVisualization(folderPath)
 
     '''=====================拟合strength========================'''
-    # inputMatrix= loadYaml(r'C:\WorkSpace\serialPortVisualization\data\0825_LSC_curveFit\LSC_A_L122.yaml')
-    # outputMatrix= loadYaml(r'C:\WorkSpace\serialPortVisualization\data\0825_LSC_curveFit\LSC_A_L86.yaml')
+    # inputMatrix= loadYaml(r'C:\WorkSpace\serialPortVisualization\data\0825_LSC\LSC_A_L122.yaml')
+    # outputMatrix= loadYaml(r'C:\WorkSpace\serialPortVisualization\data\0825_LSC\LSC_A_L86.yaml')
     # strengthR= fitLscMatrixStrength(np.array(inputMatrix['R']),np.array(outputMatrix['R']))
+    # strengthR_Torch= fitLscMatrixStrengthTorch(np.array(inputMatrix['R']),np.array(outputMatrix['R']))
+    # print(f"strengthR={strengthR:.3f},strengthR_Torch={strengthR_Torch:.3f}")
     # strengthGr= fitLscMatrixStrength(np.array(inputMatrix['Gr']),np.array(outputMatrix['Gr']))
     # strengthGb= fitLscMatrixStrength(np.array(inputMatrix['Gb']),np.array(outputMatrix['Gb']))
     # strengthB= fitLscMatrixStrength(np.array(inputMatrix['B']),np.array(outputMatrix['B']))
