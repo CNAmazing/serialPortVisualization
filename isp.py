@@ -185,13 +185,13 @@ def wbestParamFromYaml(keyCT,yamlPath):
   
     print(f"Using lsc yaml file: {yaml_file}...")
     dataYaml = loadYaml(yaml_file)
-    gainParam=dataYaml['awbParam']
+    gainParam=dataYaml['awbParamNormalized']
     wb_R = np.array(gainParam['R'])
     wb_Gr = np.array(gainParam['Gr'])
     wb_Gb = np.array(gainParam['Gr'])
     wb_B = np.array(gainParam['B'])
 
-    ccm=dataYaml['CCM']
+    ccm=dataYaml['CCMNormalized']
     # print(gainParam)
     return np.array([wb_R,wb_Gr,wb_Gb,wb_B]),np.array(ccm)
 def ispPipe(image_folder,lsc_yaml_folder,awb_yaml_folder):
@@ -241,7 +241,7 @@ def ispPipe(image_folder,lsc_yaml_folder,awb_yaml_folder):
         img /=1023 # 归一化
         # imgTmp=AWB_RGB(imgTmp,bestParam)
         # imgTmp= ccmApply_3x4(imgTmp,ccm)
-        img= ccmApply(img,ccm)
+        # img= ccmApply(img,ccm)
         img= Gamma(img)
 
         img=img[...,::-1] # RGB转BGR
@@ -253,6 +253,6 @@ def ispPipe(image_folder,lsc_yaml_folder,awb_yaml_folder):
        
 if __name__ == "__main__":
     image_folder=r'C:\WorkSpace\serialPortVisualization\data\0901LSC'
-    lsc_yaml_folder=r'C:\WorkSpace\serialPortVisualization\data\1009LSC'
+    lsc_yaml_folder=r'C:\WorkSpace\serialPortVisualization\data\1010LSC'
     awb_yaml_folder=r'C:\WorkSpace\serialPortVisualization\data\g07s5ColorChecker\ispResults10'
     ispPipe(image_folder,lsc_yaml_folder,awb_yaml_folder)

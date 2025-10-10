@@ -46,6 +46,8 @@ def func_1_r2_r4_1(x, a, b,c ):
     return 1+ a * x + b * x**3+c* x**4
 def func_1_r2_r4(x, a,b,c ):
     return 1+ a * x*x +b*x**3 +c* x**4
+def func_1_r1_r2(x, a,b ):
+    return 1+ a * x +b*x**2 
 def curveFit(data,func):
     # 获取函数的参数信息
     sig = inspect.signature(func)
@@ -256,14 +258,14 @@ def lscCenterCheck(data):
         for idx in range(4):
             tmpData=rgbData[idx]
             dataLut= np.column_stack((xLocation.flatten(), tmpData))
-            params = curveFit(dataLut, func=func_1_r2_r4)
+            params = curveFit(dataLut, func=func_1_r1_r2)
             lut = np.zeros((m , n ))
             for j in range(n ):
                 for i in range(m ):
-                    lut[i][j] = func_1_r2_r4(generater2Center(i, j, m, n,tmpX,tmpY), *params)
+                    lut[i][j] = func_1_r1_r2(generater2Center(i, j, m, n,tmpX,tmpY), *params)
             lut=lut.flatten()
             error+=np.mean(np.sqrt((tmpData - lut) ** 2))
-        print(f"当前中心点: ({tmpX:.4f}, {tmpY:.4f}),误差: {error:.4f}")
+        # print(f"当前中心点: ({tmpX:.4f}, {tmpY:.4f}),误差: {error:.4f}")
         return error
     result = minimize(  loss,
                         x0=[0.5, 0.5],

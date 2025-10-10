@@ -5,6 +5,7 @@ import inspect
 from scipy.optimize import curve_fit
 import scienceplots  # 导入科学绘图样式
 import matplotlib as mpl
+from scipy.optimize import minimize
 plt.style.use(['science', 'no-latex'])  # 不使用LaTeX渲染
 
 plt.rcParams['font.size'] = 14          # 全局字体大小
@@ -275,7 +276,7 @@ def generate_lut(m: int, n: int,  ):
             lut[x][y] = r2 # reproduces the cos^4 rule
     
     return np.array(lut)
-def curveFit(data,func):
+def curveFit(data,func,showPlot=False):
     # 获取函数的参数信息
     sig = inspect.signature(func)
     parameters = list(sig.parameters.keys())
@@ -301,7 +302,8 @@ def curveFit(data,func):
     for name, value in zip(fit_param_names, params):
         param_values[name] = value
     
-
+    if not showPlot:
+        return params
     # 计算拟合值
     y_fit = func(x,*params)
 
@@ -325,13 +327,76 @@ def generater2(x,y,m=24,n=32):
     dx = (x - m / 2 + 0.5) * asymmetry
     r2 = (dx * dx + dy * dy) / R2
     return r2
-def matrix_fit(matrix):
+def generate_lut2(m: int, n: int, center_x: float = 0.5, center_y: float = 0.5, c_strength: float = 1.0):
+    """
+    Generate a lookup table for brightness adjustment with adjustable center.
+    
+    Args:
+        m: Number of rows in block grid (original m)
+        n: Number of columns in block grid (original n)
+        center_x: X coordinate of center point (normalized 0-1, default 0.5)
+        center_y: Y coordinate of center point (normalized 0-1, default 0.5)
+        c_strength: Corner strength parameter
+    
+    Returns:
+        2D numpy array of gain values ((m+1) x (n+1))
+    """
+    # Convert grid dimensions to number of points
+    m_points = m + 1
+    n_points = n + 1
+    
+    # Set default center if not specified
+    
+    # Convert normalized center coordinates to grid coordinates
+    center_x_grid = center_x * m
+    center_y_grid = center_y * n
+    
+    lut = [[0.0 for _ in range(n_points)] for _ in range(m_points)]
+    
+    asymmetry = 1.0
+    R2 = m * n / 4 * (1 + asymmetry * asymmetry)
+    
+    for y in range(n_points):
+        for x in range(m_points):
+            # Calculate distance from current point to custom center
+            dy = y - center_y_grid
+            dx = (x - center_x_grid) * asymmetry
+            r2 = (dx * dx + dy * dy) / R2
+            lut[x][y] = r2  # reproduces the cos^4 rule
+    
+    return np.array(lut)
+
+def generater2Center(x, y, m=24, n=32, center_x=0.5, center_y=0.5, asymmetry=1.0):
+    """
+    Calculate the normalized squared distance from (x,y) to a custom center point.
+    
+    Args:
+        x, y: Coordinates of the point to evaluate.
+        m, n: Grid dimensions (default 24x32).
+        center_x: X-coordinate of the center (normalized 0-1, default 0.5).
+        center_y: Y-coordinate of the center (normalized 0-1, default 0.5).
+        asymmetry: Asymmetry factor (default 1.0).
+    
+    Returns:
+        r2: Normalized squared distance from (x,y) to the center.
+    """
+    
+    # Convert normalized center to grid coordinates
+    center_x_grid = center_x * m
+    center_y_grid = center_y * n
+    R2 = m * n / 4 * (1 + asymmetry * asymmetry)
+    # Calculate distance from (x,y) to the custom center
+    dy = y - center_y_grid
+    dx = (x - center_x_grid) * asymmetry
+    r2 = (dx * dx + dy * dy) / R2
+    return r2
+def matrix_fit(matrix,center_x,center_y):
     result=[]
     for ch in matrix:
             dataLut= ch
             m = len(dataLut) 
             n = len(dataLut[0]) 
-            xIdx = generate_lut(m-1, n-1)
+            xIdx = generate_lut2(m-1, n-1, center_x,center_y)
             dataLut = np.array(dataLut)
             # xIdx = xIdx[:, :xIdx.shape[1]//2]  
             # dataLut = dataLut[:, :dataLut.shape[1]//2] 
@@ -344,13 +409,75 @@ def matrix_fit(matrix):
             lut = np.zeros((m , n ))
             for j in range(n ):
                 for i in range(m ):
-                    lut[i][j] = func_1_r1_r2(generater2(i, j, m, n,), *params)
+                    lut[i][j] = func_1_r1_r2(generater2Center(i, j, m, n,center_x,center_y), *params)
             result.append( convert_numpy(lut))
     return np.array(result)
 
+def fit_center(matrix, m=24, n=32):
+    #matrix.shape=(5, 4, 25, 33)
+    m,n=m+1,n+1
+    gain_matrix=matrix.reshape(-1, (m)*(n))
+    # print(gain_matrix.shape)
+    def loss (params,gain_matrix):
+        tmpX, tmpY = params
+        xLocation=generate_lut2(m-1,n-1 , tmpX, tmpY)
+        # print('xLocation',xLocation.shape)
+        xLocation=xLocation.flatten()
+        # print(xLocation.shape,gain_matrix.shape)
+        error=0.0
+        for channel_matrix in gain_matrix:
+            dataLut= np.column_stack((xLocation, channel_matrix))
+            params = curveFit(dataLut, func=func_1_r1_r2,showPlot=False)
+            lut = np.zeros((m , n ))
+            for j in range(n ):
+                for i in range(m ):
+                    lut[i][j] = func_1_r1_r2(generater2Center(i, j, m, n,tmpX,tmpY), *params)
+            lut=lut.flatten()
+            error+=np.mean(np.sqrt((channel_matrix - lut) ** 2))
+        # print(f"当前中心点: ({tmpX:.4f}, {tmpY:.4f}),误差: {error:.4f}")
+        return error
+    result = minimize(  loss,
+                        x0=[0.5, 0.5],
+                        args=(gain_matrix,),
+                        method='L-BFGS-B',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
+                        bounds=[(0, 1), (0, 1)])
+    centerX,centerY=result.x
+    print(f"优化后中心点: ({centerX:.4f}, {centerY:.4f})")
+    return centerX,centerY
+def get_image_center(full_paths,basenames,h,w):
+    # center_x=0.517
+    # center_y=0.478
+    m=24
+    n=32
+    data=[]
+    for path,basename in zip(full_paths,basenames):
+        # rawImage = read_pgm_with_opencv(path)
+         # rawImage = read_pgm_with_opencv(path)
+        rawImage=readRaw(path,h,w)
+        blcParam=64
+        rawImage= rawImage - blcParam
+        if rawImage is  None:
+            raise ValueError("raw data is None")
+        
+        resultList=[]
+        for s in range(4,11,2):
+            resultTmp = lsc_calib(rawImage, mesh_h_nums=m, mesh_w_nums=n, sample_size=s,maxFactor=1.0)
+            resultList.append(resultTmp)
+        stacked = np.stack(resultList)  
+
+        result = np.mean(stacked, axis=0)
+        data.append(result)
+    matrix=np.array(data)
+    center=fit_center(matrix,m,n)
+    return center
+    # data.shape(5, 4, 25, 33)
+    
+    
+
 def lenShadingCalibrationForRaw(image_folder,h,w):
     full_paths, basenames = get_paths(image_folder,suffix=".raw")
-    centerList=[]
+    center_x,center_y=get_image_center(full_paths,basenames,h,w)
+ 
     for path,basename in zip(full_paths,basenames):
         # rawImage = read_pgm_with_opencv(path)
         rawImage=readRaw(path,h,w)
@@ -358,28 +485,25 @@ def lenShadingCalibrationForRaw(image_folder,h,w):
         rawImage= rawImage - blcParam
         if rawImage is  None:
             raise ValueError("raw data is None")
-        avgLRaw= rawImage.mean()
-        avgLRaw=avgLRaw/1023*255
-        print(f"图像尺寸: {rawImage.shape},数据类型: {rawImage.dtype},最小值: {rawImage.min()}, 最大值: {rawImage.max()},均值_10bit:{rawImage.mean()},均值_8bit:{avgLRaw}")  # (高度, 宽度)
+    
+        print(f"图像尺寸: {rawImage.shape},数据类型: {rawImage.dtype},最小值: {rawImage.min()}, 最大值: {rawImage.max()},均值_10bit:{rawImage.mean()}")  # (高度, 宽度)
         
         resultList=[]
-        for s in range(4,11,2):
+        for s in range(4,11,1):
             resultTmp = lsc_calib(rawImage, mesh_h_nums=24, mesh_w_nums=32, sample_size=s,maxFactor=1.0)
             resultList.append(resultTmp)
         stacked = np.stack(resultList)  
 
         result = np.mean(stacked, axis=0)
- 
+    
+    
         #result.shape=(4,25,33)
-        result=matrix_fit(result)
+        result=matrix_fit(result,center_x,center_y)
 
         
         visualize_2d_array_multi(result, basename)
         saveYaml_RGGB(result, basename)
 
-    centerArray=np.array(centerList)
-    avgCenter=np.mean(centerArray,axis=0)
-    print(f"平均中心位置: 行={avgCenter[0]:.2f}, 列={avgCenter[1]:.2f}")
 if __name__ == "__main__":
     folderPath=r'C:\WorkSpace\serialPortVisualization\data\0901LSC'
     lenShadingCalibrationForRaw(folderPath,h=1944,w=2592)
