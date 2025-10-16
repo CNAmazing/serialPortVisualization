@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import inspect
 from scipy.optimize import curve_fit
+from scipy.spatial import distance_matrix,ConvexHull
 import scienceplots  # 导入科学绘图样式
 import matplotlib as mpl
 from scipy.optimize import minimize
@@ -276,6 +277,7 @@ def generate_lut(m: int, n: int,  ):
             lut[x][y] = r2 # reproduces the cos^4 rule
     
     return np.array(lut)
+
 def curveFit(data,func,showPlot=False):
     # 获取函数的参数信息
     sig = inspect.signature(func)
@@ -292,10 +294,7 @@ def curveFit(data,func,showPlot=False):
     data = data[sorted_indices]
     x = data[:,0]
     y = data[:,1]
-
-
     params, covariance = curve_fit(func, x, y, p0=p0,maxfev=100000)  # 设置边界条件，避免参数为负值
-    param_errors = np.sqrt(np.diag(covariance))
 
     # print(f"param_errors: {param_errors}")
     param_values = {}
@@ -306,16 +305,11 @@ def curveFit(data,func,showPlot=False):
         return params
     # 计算拟合值
     y_fit = func(x,*params)
-
-    plt.figure(figsize=(14,7)) 
+    plt.figure(figsize=(14,7))
     plt.scatter(x, y, label="原始数据")
     plt.plot(x, y_fit, 'r-', label="拟合曲线")
     plt.legend()
     plt.show()
-    param_str = ", ".join([f"{name}={value}" for name, value in param_values.items()])
-    paramError_str = ", ".join([f"{name}误差={error}" for name, error in zip(fit_param_names, param_errors)])
-    print(f"拟合参数: {param_str}")
-    print(f"拟合误差: {paramError_str}")
     return params
 def generater2(x,y,m=24,n=32):
     asymmetry = 1.0
@@ -390,6 +384,7 @@ def generater2Center(x, y, m=24, n=32, center_x=0.5, center_y=0.5, asymmetry=1.0
     dx = (x - center_x_grid) * asymmetry
     r2 = (dx * dx + dy * dy) / R2
     return r2
+
 def matrix_fit(matrix,center_x,center_y):
     result=[]
     for ch in matrix:
@@ -404,7 +399,7 @@ def matrix_fit(matrix,center_x,center_y):
             xIdx = xIdx.flatten()
             dataLut = np.column_stack((xIdx, dataLut))
             
-            params = curveFit(dataLut, func=func_1_r1_r2)
+            params = curveFit(dataLut, func=func_1_r1_r2,showPlot=False)
             
             lut = np.zeros((m , n ))
             for j in range(n ):
@@ -433,14 +428,15 @@ def fit_center(matrix, m=24, n=32):
                 for i in range(m ):
                     lut[i][j] = func_1_r1_r2(generater2Center(i, j, m, n,tmpX,tmpY), *params)
             lut=lut.flatten()
-            error+=np.mean(np.sqrt((channel_matrix - lut) ** 2))
+            error+=np.mean((((channel_matrix - lut)) ** 2)*xLocation)
         # print(f"当前中心点: ({tmpX:.4f}, {tmpY:.4f}),误差: {error:.4f}")
         return error
     result = minimize(  loss,
                         x0=[0.5, 0.5],
                         args=(gain_matrix,),
-                        method='L-BFGS-B',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
+                        method='L-BFGS-B',#trust-constr SLSQP  L-BFGS-B TNC COBYLA Nelder-Mead Powell
                         bounds=[(0, 1), (0, 1)])
+    
     centerX,centerY=result.x
     print(f"优化后中心点: ({centerX:.4f}, {centerY:.4f})")
     return centerX,centerY
@@ -451,8 +447,6 @@ def get_image_center(full_paths,basenames,h,w):
     n=32
     data=[]
     for path,basename in zip(full_paths,basenames):
-        # rawImage = read_pgm_with_opencv(path)
-         # rawImage = read_pgm_with_opencv(path)
         rawImage=readRaw(path,h,w)
         blcParam=64
         rawImage= rawImage - blcParam
@@ -460,7 +454,7 @@ def get_image_center(full_paths,basenames,h,w):
             raise ValueError("raw data is None")
         
         resultList=[]
-        for s in range(4,11,2):
+        for s in range(4,11,1):
             resultTmp = lsc_calib(rawImage, mesh_h_nums=m, mesh_w_nums=n, sample_size=s,maxFactor=1.0)
             resultList.append(resultTmp)
         stacked = np.stack(resultList)  
@@ -472,12 +466,12 @@ def get_image_center(full_paths,basenames,h,w):
     return center
     # data.shape(5, 4, 25, 33)
     
-    
+ 
 
 def lenShadingCalibrationForRaw(image_folder,h,w):
     full_paths, basenames = get_paths(image_folder,suffix=".raw")
     center_x,center_y=get_image_center(full_paths,basenames,h,w)
- 
+    # center_x,center_y=0.478,0.525,
     for path,basename in zip(full_paths,basenames):
         # rawImage = read_pgm_with_opencv(path)
         rawImage=readRaw(path,h,w)
@@ -505,5 +499,5 @@ def lenShadingCalibrationForRaw(image_folder,h,w):
         saveYaml_RGGB(result, basename)
 
 if __name__ == "__main__":
-    folderPath=r'C:\WorkSpace\serialPortVisualization\data\0901LSC'
+    folderPath=r'C:\WorkSpace\serialPortVisualization\data\1011LSC'
     lenShadingCalibrationForRaw(folderPath,h=1944,w=2592)

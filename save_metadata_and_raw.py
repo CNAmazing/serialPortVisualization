@@ -178,12 +178,12 @@ def draw_metadata_on_image(image, meta):
     return image
 
 if __name__ == "__main__":
-    folder = r"C:\serialPortVisualization\data\0813_5"
+    folder = r"C:\Users\15696\Desktop\new"
     dng_files = glob(os.path.join(folder, "*.dng"))
 
     for dng_path in dng_files:
         name = os.path.splitext(os.path.basename(dng_path))[0]
-        png_path = os.path.join(folder, f"{name}.png")
+        png_path = os.path.join(folder, f"{name}.jpg")
 
         if not os.path.exists(png_path):
             print(f"[跳过] PNG 不存在: {png_path}")

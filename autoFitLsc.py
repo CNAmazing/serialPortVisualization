@@ -246,7 +246,7 @@ def rgb_to_lab(rgb):
     return lab
 def Demosaic(bayer_pgm):
     # 常见选项：COLOR_BAYER_BG2RGB, COLOR_BAYER_RG2RGB, COLOR_BAYER_GB2RGB 等
-    # bayer_pgm= bayer_pgm.astype(np.uint16)  # 确保数据类型为 uint16
+    bayer_pgm= bayer_pgm.astype(np.uint16)  # 确保数据类型为 uint16
     rgb = cv2.cvtColor(bayer_pgm, cv2.COLOR_BAYER_BGGR2RGB)
     return rgb
 def BLC(img,blcParam=16):
@@ -709,7 +709,7 @@ IDEAL_RGB = np.array([
       [0.191	,0.194	,0.199],
     ])  
 # IDEAL_LINEAR_RGB = reverseGamma(IDEAL_RGB) # 逆Gamma处理后的理想RGB值
-IDEAL_LINEAR_RGB = reverseGamma(ColorCheckerRGB) # 逆Gamma处理后的理想RGB值
+IDEAL_LINEAR_RGB = reverseGamma(IDEAL_RGB) # 逆Gamma处理后的理想RGB值
 def ccmApply_3x4(img,ccm):
     # 3. 应用CCM矫正（使用左乘）
     h, w = img.shape[:2] #H*W*3
@@ -778,11 +778,15 @@ def calColorErrorE2000(img, area):
     print(f"delta_es: {delta_es}...")
     return np.sum(delta_es)
 
-def autoFitAwb(image_folder):
-    
+def autoFitAwb(image_folder,lscyamlFolder):
+    fixGreen= False
     @timeit
-    def loss (x,  imgLSC,area):
-        rGain, gGain, bGain = x
+    def loss (x,  imgLSC,area,fixGreen):
+        if fixGreen:
+            rGain, bGain = x
+            gGain= 1.0
+        else:
+            rGain, gGain, bGain = x
         awbParam=[bGain,gGain,gGain,rGain]
         imgTmp=AWB(imgLSC,awbParam)
         imgTmp=Demosaic(imgTmp)
@@ -809,73 +813,79 @@ def autoFitAwb(image_folder):
         return  error
     
     full_paths, basenames = get_paths(image_folder,suffix=".raw")
+    #no d50 d75
+    area=[[670, 670, 930, 930], [1160, 670, 1420, 930], [1650, 670, 1910, 930], [2140, 670, 2400, 930], [2630, 670, 2890, 930], [3120, 670, 3380, 930], [670, 1160, 930, 1420], [1160, 1160, 1420, 1420], [1650, 1160, 1910, 1420], [2140, 1160, 2400, 1420], [2630, 1160, 2890, 1420], [3120, 1160, 3380, 1420], [670, 1650, 930, 1910], [1160, 1650, 1420, 1910], [1650, 1650, 1910, 1910], [2140, 1650, 2400, 1910], [2630, 1650, 2890, 1910], [3120, 1650, 3380, 1910], [670, 2140, 930, 2400], [1160, 2140, 1420, 2400], [1650, 2140, 1910, 2400], [2140, 2140, 2400, 2400], [2630, 2140, 2890, 2400], [3120, 2140, 3380, 2400]]
+    #d50 
+    # area=[[628, 537, 888, 797], [1133, 537, 1393, 797], [1638, 537, 1898, 797], [2143, 537, 2403, 797], [2648, 537, 2908, 797], [3153, 537, 3413, 797], [628, 1042, 888, 1302], [1133, 1042, 1393, 1302], [1638, 1042, 1898, 1302], [2143, 1042, 2403, 1302], [2648, 1042, 2908, 1302], [3153, 1042, 3413, 1302], [628, 1547, 888, 1807], [1133, 1547, 1393, 1807], [1638, 1547, 1898, 1807], [2143, 1547, 2403, 1807], [2648, 1547, 2908, 1807], [3153, 1547, 3413, 1807], [628, 2052, 888, 2312], [1133, 2052, 1393, 2312], [1638, 2052, 1898, 2312], [2143, 2052, 2403, 2312], [2648, 2052, 2908, 2312], [3153, 2052, 3413, 2312]]
+    #d75
 
-    x=[1,1,1] #rGain, gGain, bGain
-    yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0901lscConfig2'
-    # area=[[397, 493, 547, 643], [702, 493, 852, 643], [1007, 493, 1157, 643], [1312, 493, 1462, 643], [1617, 493, 1767, 643], [1922, 493, 2072, 643], [397, 798, 547, 948], [702, 798, 852, 948], [1007, 798, 1157, 948], [1312, 798, 1462, 948], [1617, 798, 1767, 948], [1922, 798, 2072, 948], [397, 1103, 547, 1253], [702, 1103, 852, 1253], [1007, 1103, 1157, 1253], [1312, 1103, 1462, 1253], [1617, 1103, 1767, 1253], [1922, 1103, 2072, 1253], [397, 1408, 547, 1558], [702, 1408, 852, 1558], [1007, 1408, 1157, 1558], [1312, 1408, 1462, 1558], [1617, 1408, 1767, 1558], [1922, 1408, 2072, 1558]]
-    # area=[[320, 410, 470, 560], [640, 410, 790, 560], [960, 410, 1110, 560], [1280, 410, 1430, 560], [1600, 410, 1750, 560], [1920, 410, 2070, 560], [320, 730, 470, 880], [640, 730, 790, 880], [960, 730, 1110, 880], [1280, 730, 1430, 880], [1600, 730, 1750, 880], [1920, 730, 2070, 880], [320, 1050, 470, 1200], [640, 1050, 790, 1200], [960, 1050, 1110, 1200], [1280, 1050, 1430, 1200], [1600, 1050, 1750, 1200], [1920, 1050, 2070, 1200], [320, 1370, 470, 1520], [640, 1370, 790, 1520], [960, 1370, 1110, 1520], [1280, 1370, 1430, 1520], [1600, 1370, 1750, 1520], [1920, 1370, 2070, 1520]]
-    area=[[710, 471, 840, 601], [965, 471, 1095, 601], [1220, 471, 1350, 601], [1475, 471, 1605, 601], [1730, 471, 1860, 601], [1985, 471, 2115, 601], [710, 726, 840, 856], [965, 726, 1095, 856], [1220, 726, 1350, 856], [1475, 726, 1605, 856], [1730, 726, 1860, 856], [1985, 726, 2115, 856], [710, 981, 840, 1111], [965, 981, 1095, 1111], [1220, 981, 1350, 1111], [1475, 981, 1605, 1111], [1730, 981, 1860, 1111], [1985, 981, 2115, 1111], [710, 1236, 840, 1366], [965, 1236, 1095, 1366], [1220, 1236, 1350, 1366], [1475, 1236, 1605, 1366], [1730, 1236, 1860, 1366], [1985, 1236, 2115, 1366]]
-    # area=[[385, 490, 495, 600], [695, 490, 805, 600], [1005, 490, 1115, 600], [1315, 490, 1425, 600], [1625, 490, 1735, 600], [1935, 490, 2045, 600], [385, 800, 495, 910], [695, 800, 805, 910], [1005, 800, 1115, 910], [1315, 800, 1425, 910], [1625, 800, 1735, 910], [1935, 800, 2045, 910], [385, 1110, 495, 1220], [695, 1110, 805, 1220], [1005, 1110, 1115, 1220], [1315, 1110, 1425, 1220], [1625, 1110, 1735, 1220], [1935, 1110, 2045, 1220], [385, 1420, 495, 1530], [695, 1420, 805, 1530], [1005, 1420, 1115, 1530], [1315, 1420, 1425, 1530], [1625, 1420, 1735, 1530], [1935, 1420, 2045, 1530]]
     for path,basename in zip(full_paths,basenames):
         keyCT= getCTstr(path)
        
         print(f"Processing image: {path},colorTemp:{keyCT}...")   
 
 
-        # yaml_files,_= get_paths(yamlFolder,suffix=".yaml")
-        # for yf in yaml_files:
-        #     if keyCT in yf:
-        #         yaml_file=yf
-        #         break
-        # if yaml_file == '':
-        #     print(f"未找到对应的yaml文件，跳过处理: {keyCT}")
-        #     continue
-        # print(f"Using yaml file: {yaml_file}...")
-        # dataYaml = loadYaml(yaml_file)
-        # gainList=[]
+        yaml_files,_= get_paths(lscyamlFolder,suffix=".yaml")
+        for yf in yaml_files:
+            if keyCT in yf:
+                yaml_file=yf
+                break
+        if yaml_file == '':
+            print(f"未找到对应的yaml文件，跳过处理: {keyCT}")
+            continue
+        print(f"Using yaml file: {yaml_file}...")
+        dataYaml = loadYaml(yaml_file)
+        gainList=[]
         
-        # mesh_R = np.array(dataYaml['R'])
-        # mesh_Gr = np.array(dataYaml['Gr'])
-        # mesh_Gb = np.array(dataYaml['Gb'])
-        # mesh_B = np.array(dataYaml['B'])
+        mesh_R = np.array(dataYaml['R'])
+        mesh_Gr = np.array(dataYaml['Gr'])
+        mesh_Gb = np.array(dataYaml['Gb'])
+        mesh_B = np.array(dataYaml['B'])
 
-        # gainList.append(mesh_R)
-        # gainList.append(mesh_Gr)
-        # gainList.append(mesh_Gb)
-        # gainList.append(mesh_B)
+        gainList.append(mesh_R)
+        gainList.append(mesh_Gr)
+        gainList.append(mesh_Gb)
+        gainList.append(mesh_B)
    
-        # img = read_pgm_with_opencv(path)
-        img = readRaw(path,h=1944,w=2592)  # 读取为numpy数组
+        img = readRaw(path,h=3072,w=4096)  # 读取为numpy数组
         print(f"图像尺寸: {img.shape},数据类型: {img.dtype},最小值: {img.min()}, 最大值: {img.max()},均值_10bit:{img.mean()},均值_8bit:{img.mean()/1023*255}")  # (高度, 宽度)
         img= BLC(img,blcParam=64)
         # img=bm3d_denoise(img)
-        img=median_filter_NR(img)
-        # imgLSC=LSC(img,gainList,strength=[1,1,1,1])
-        imgLSC=img
+        lsc_strength=1
+        imgLSC=LSC(img,gainList,strength=[lsc_strength,lsc_strength,lsc_strength,lsc_strength])
         minError=float('inf')
         bestParam=None
         bestCCM=None
         saveFolderName='ispResults'
         savePath=os.path.join(image_folder,saveFolderName)
-
+        if fixGreen:
+            x=[1,1] #rGain, bGain
+            bounds=[(0.3, 3.5), (0.3, 3.5)]
+        else:    
+            x=[1,1,1] #rGain, gGain, bGain
+            bounds=[(0.3, 3.5), (0.3,3.5), (0.3, 3.5)]
         awbResult=minimize(
             loss,  # 包装loss函数
             x,  
-            args=(imgLSC,area),
+            args=(imgLSC,area,fixGreen),
             # constraints=constraints,
-            bounds=[(0.3, 3.5), (0.3,3.5), (0.3, 3.5)],
+            bounds=bounds,
             method='Nelder-Mead',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
             options={'maxiter': 10000,'disp': True}
         )
-        r,g,b=awbResult.x
+        if fixGreen:
+            r,b=awbResult.x
+            g=1.0
+        else:
+            r,g,b=awbResult.x
         bestParam=[b,g,g,r]
+        bestParam=np.array(bestParam)
         print(f"优化结果: {awbResult}")
         # imgTmp= AWB(imgLSC,bestParam)  # 假设红蓝通道增益为1.0
         imgTmp= AWB(imgLSC,bestParam)  # 假设红蓝通道增益为1.0
         imgTmp=Demosaic(imgTmp)
         imgTmp = imgTmp.astype(np.float64)
         np.clip(imgTmp, 0, 1023, out=imgTmp)
-        # imgTmp=np.clip(imgTmp,0,1023)
         imgTmp /=1023 # 归一化
         # imgTmp=AWB_RGB(imgTmp,bestParam)
         color_means= calColor(imgTmp,area)
@@ -897,6 +907,10 @@ def autoFitAwb(image_folder):
         os.makedirs(savePath, exist_ok=True)
         imgSavePath=os.path.join(savePath, f"{basename}_error{error:.2f}.jpg")
         cv2.imwrite(imgSavePath, imgTmp)
+        bestParamx1e8=np.array(bestParam)*100000000
+        bestCCMx1e8= bestCCM*100000000
+        bestParamx1e8=bestParamx1e8.astype(np.int64)
+        bestCCMx1e8=bestCCMx1e8.astype(np.int64)
         awbParamNormalized=bestParam/bestParam[1]
         ccmNormalized= bestCCM*bestParam[1]
         awbx1e8=awbParamNormalized*100000000
@@ -911,6 +925,13 @@ def autoFitAwb(image_folder):
                 'B': float(f"{bestParam[0]:.4f}"),
             },
             'CCM': bestCCM.tolist(),
+            'awbParam_x': {
+                'R': int(f"{bestParamx1e8[3]}"),
+                'Gr':int(f"{bestParamx1e8[1]}"),
+                'Gb':int(f"{bestParamx1e8[2]}"),
+                'B': int(f"{bestParamx1e8[0]}"),
+            },
+            'CCM_x': bestCCMx1e8.tolist(),
             'Error': float(f"{minError:.4f}"),
             'awbParamNormalized': {
                 'R': float(f"{awbParamNormalized[3]:.4f}"),
@@ -1034,12 +1055,11 @@ def autoFitLsc(image_folder):
         saveYaml(yamlConfig,yamlSavePath)
         print(f"最佳awb参数: {bestParam}, 最小色彩误差: {minError},最佳CCM:\n{npToString(bestCCM)}")    
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: python rawLsc.py <folder_path>")
-        sys.exit(1)
-    
-    folderPath = sys.argv[1]
+   
     # autoFitLsc(folderPath)
-    autoFitAwb(folderPath)
+
+    folderPath= r'C:\WorkSpace\serialPortVisualization\data\1016_671\24nod50d75'
+    lscyamlFolder= r'C:\WorkSpace\serialPortVisualization\data\1016_G12_LSC'
+    autoFitAwb(folderPath,lscyamlFolder)
 
 main()

@@ -1,10 +1,25 @@
 from tools import *
 import cv2
+
 def Gamma(img):
     GAMMA_EXP = 1.0 / 2.4  # 预计算常数
     mask = img <= 0.0031308
     img = np.where(mask, img * 12.92, 1.055 * (img ** GAMMA_EXP) - 0.055)
+    img= np.clip(img, 0, 1)
     return img
+def AWB_RGB(image, awbParam,):
+
+    rGain, grGain, gbGain, bGain = awbParam
+    tmp= bGain
+    bGain= rGain
+    rGain=tmp
+    gGain = (grGain + gbGain) / 2
+    
+    image[:,:,0] = image[:,:,0] * (1 + (bGain - 1) )
+    image[:,:,1] = image[:,:,1] * (1 + (gGain - 1) )
+    image[:,:,2] = image[:,:,2] * (1 + (rGain - 1) )
+    image=np.clip(image, 0, 1, )
+    return image
 def ccmApply(img,ccm):
     
     # 3. 应用CCM矫正（使用左乘）
@@ -13,6 +28,7 @@ def ccmApply(img,ccm):
     np.dot(rgb_flat, ccm.T,out=rgb_flat)  # 等价于 (ccm @ rgb_flat.T).T
     rgb_flat = rgb_flat.reshape(h, w, 3)
     # 5. 裁剪并转换到8位
+    rgb_flat = np.clip(rgb_flat, 0, 1)
     return rgb_flat
 def LSC(image, gainList, strength=[1.0,1.0,1.0,1.0],):
     """
@@ -142,9 +158,17 @@ def LSC_rgb(image, gainList, strength=[1.0, 1.0, 1.0]):
     gain_G = bilinear_interp(mesh_G)
     gain_B = bilinear_interp(mesh_B)
 
+    #应用自适应亮度调节
+    # img_R=image[:,:,0]
+    # img_G=image[:,:,1]
+    # img_B=image[:,:,2]
+    # gain_R=1+(gain_R-1)*(img_R-img_R.min())/(img_R.max()-img_R.min()+1e-8)
+    # gain_G=1+(gain_G-1)*(img_G-img_G.min())/(img_G.max()-img_G.min()+1e-8)
+    # gain_B=1+(gain_B-1)*(img_B-img_B.min())/(img_B.max()-img_B.min()+1e-8)
     # 构建gain_map并应用
     gain_map = np.stack([gain_R, gain_G, gain_B], axis=-1)
-    result = np.clip(image * gain_map, 0, 1023).astype(np.float64)
+    result = image * gain_map
+    result=np.clip(result, 0, 1)
     return result
 def AWB(image, awbParam):
     """
@@ -176,13 +200,13 @@ def BLC(img,blcParam=64):
     img= img - blcParam 
     img = np.clip(img, 0, 1023)  # 确保像素值在有效范围内
     return img
-def wbestParamFromYaml(keyCT,yamlPath):
+def wbccmParamFromYaml(keyCT,yamlPath):
     yaml_files,_= get_paths(yamlPath,suffix=".yaml")
     for yf in yaml_files:
         if keyCT in yf:
             yaml_file=yf
             break
-  
+            
     print(f"Using lsc yaml file: {yaml_file}...")
     dataYaml = loadYaml(yaml_file)
     gainParam=dataYaml['awbParamNormalized']
@@ -194,14 +218,13 @@ def wbestParamFromYaml(keyCT,yamlPath):
     ccm=dataYaml['CCMNormalized']
     # print(gainParam)
     return np.array([wb_R,wb_Gr,wb_Gb,wb_B]),np.array(ccm)
-def ispPipe(image_folder,lsc_yaml_folder,awb_yaml_folder):
+def ispPipe(image_folder,lsc_yaml_folder,awb_yaml_folder,lsc_strength=1):
     
     full_paths, basenames = get_paths(image_folder,suffix=".raw")
     saveFolderName='ispResults'
     savePath=os.path.join(image_folder,saveFolderName)
-    x=[1,1,1] #rGain, gGain, bGain
     for path,basename in zip(full_paths,basenames):
-        keyCT= getCTstr(path)
+        keyCT= getCTstr(basename)
        
         print(f"Processing image: {path},colorTemp:{keyCT}...")   
         yaml_files,_= get_paths(lsc_yaml_folder,suffix=".yaml")
@@ -225,26 +248,30 @@ def ispPipe(image_folder,lsc_yaml_folder,awb_yaml_folder):
         gainList.append(mesh_Gr)
         gainList.append(mesh_Gb)
         gainList.append(mesh_B)
-        bestParam,ccm=wbestParamFromYaml(keyCT,awb_yaml_folder)
+        # bestParam,ccm=wbccmParamFromYaml(keyCT,awb_yaml_folder)
         
-        img = readRaw(path,h=1944,w=2592)  # 读取为numpy数组
-        print(f"图像尺寸: {img.shape},数据类型: {img.dtype},最小值: {img.min()}, 最大值: {img.max()},均值_10bit:{img.mean()},均值_8bit:{img.mean()/1023*255}")  # (高度, 宽度)
+        img = readRaw(path,h=3072,w=4096)  # 读取为numpy数组
+        # img=cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        # img=img[...,::-1] # RGB转BGR
+
+        print(f"图像尺寸: {img.shape},数据类型: {img.dtype},最小值: {img.min()}, 最大值: {img.max()},均值:{img.mean()}")  # (高度, 宽度)
         img= BLC(img,blcParam=64)
-        # img=LSC(img,gainList,strength=[1,1,1,1])
+        img=LSC(img,gainList,strength=[1,1,1,1])
        
-        img= AWB(img,bestParam)  # 假设红蓝通道增益为1.0
+        # img= AWB(img,bestParam)  # 假设红蓝通道增益为1.0
         img=Demosaic(img)
-        img = img.astype(np.float64)
-        img=LSC_rgb(img,gainList,strength=[1,1,1])
-        np.clip(img, 0, 1023, out=img)
+        img = img.astype(np.float32)
+        img =img/1024 # 归一化
+        # np.clip(img, 0, 1, out=img)
+        # img=LSC_rgb(img,gainList,strength=[lsc_strength,lsc_strength,lsc_strength])
+        # np.clip(img, 0, 1, out=img)
         # imgTmp=np.clip(imgTmp,0,1023)
-        img /=1023 # 归一化
-        # imgTmp=AWB_RGB(imgTmp,bestParam)
+        # img=AWB_RGB(img,bestParam)
         # imgTmp= ccmApply_3x4(imgTmp,ccm)
         # img= ccmApply(img,ccm)
         img= Gamma(img)
-
         img=img[...,::-1] # RGB转BGR
+        
         img = np.clip(img * 255, 0, 255)
         img = img.astype(np.uint8)
         os.makedirs(savePath, exist_ok=True)
@@ -252,7 +279,7 @@ def ispPipe(image_folder,lsc_yaml_folder,awb_yaml_folder):
         cv2.imwrite(imgSavePath, img)
        
 if __name__ == "__main__":
-    image_folder=r'C:\WorkSpace\serialPortVisualization\data\0901LSC'
-    lsc_yaml_folder=r'C:\WorkSpace\serialPortVisualization\data\1010LSC'
+    image_folder=r'C:\WorkSpace\serialPortVisualization\data\1016_671\24'
+    lsc_yaml_folder=r'C:\WorkSpace\serialPortVisualization\data\1016_G12_LSC'
     awb_yaml_folder=r'C:\WorkSpace\serialPortVisualization\data\g07s5ColorChecker\ispResults10'
-    ispPipe(image_folder,lsc_yaml_folder,awb_yaml_folder)
+    ispPipe(image_folder,lsc_yaml_folder,awb_yaml_folder,lsc_strength=1)

@@ -376,5 +376,5 @@ def lenShadingCalibrationForRaw(image_folder,h,w):
 
 
 if __name__ == "__main__":
-    folderPath=r'C:\WorkSpace\serialPortVisualization\data\0901LSC'
-    lenShadingCalibrationForRaw(folderPath,h=1944,w=2592)
+    folderPath=r'C:\WorkSpace\serialPortVisualization\data\1016_LSC--977'
+    lenShadingCalibrationForRaw(folderPath,h=3072,w=4096)

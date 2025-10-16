@@ -67,8 +67,11 @@ def getCTstr(file_path):
         return 'D60'
     elif 'D65' in file_path:
         return 'D65'
-    elif 'H' in file_path:
-        return 'H'
+    elif 'D75' in file_path:
+        return 'D75'
+    elif 'TL84' in file_path:
+        return 'TL84'
+    
 def get_paths(folder_name, suffix=".jpg"):
     """
     递归获取指定文件夹及其子目录中的所有suffix图片路径及不带后缀的文件名
