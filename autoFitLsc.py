@@ -4,7 +4,7 @@ from scipy.optimize import minimize, curve_fit,least_squares
 import cv2
 import numpy as np
 from tools import *
-from skimage.color import rgb2lab
+from skimage.color import rgb2lab,deltaE_ciede2000
 from deap import base, creator, tools, algorithms
 from functools import partial
 import time
@@ -16,6 +16,11 @@ import bm3d
 from scipy.ndimage import median_filter
 #stage_arg=bm3d.BM3DStages.HARD_THRESHOLDING
 #stage_arg=bm3d.BM3DStages.ALL_STAGES
+def rgbError_detalE2000(rgb1, rgb2):
+    lab1=rgb2lab(rgb1)
+    lab2=rgb2lab(rgb2)
+    delta_e = deltaE_ciede2000(lab1, lab2)
+    return np.mean(delta_e)
 def median_filter_NR(arr, size=5):
     """
     使用scipy实现中值滤波
@@ -398,13 +403,12 @@ class CCM_3x3:
         ccm = x.reshape(3, 3)  # 将扁平化的参数恢复为3x3矩阵
         # predicted=np.dot(ccm,input)  # 应用颜色校正
         predicted=np.dot(ccm,input)  # 应用颜色校正
+        #predicted.shape=(3,24)
+        #output.shape=(3,24)
 
-        # labPredicted= rgb_to_lab(predicted.T)  # 转换为Lab颜色空间
-        # labOutput = rgb_to_lab(output.T)  # 转换为Lab颜色空间
-        # labPredicted=labPredicted.T
-        # labOutput=labOutput.T
-        # sumTmp=np.sum((labPredicted - labOutput)**2,axis=0)
- 
+        # print('predicted',predicted.shape,output.shape)
+        error=rgbError_detalE2000(predicted.T,output.T)
+        return error
         sumTmp=np.sum((predicted - output)**2,axis=0)
         # print('sumTmp',sumTmp)
         # sumTmp[1]*=3
@@ -742,42 +746,14 @@ def calColorError(img,area):
         mean_color = [Rmean, Gmean, Bmean]
         avg_colors.append(mean_color)
     avg_colors= np.array(avg_colors)  # 返回一个包含所有色块平均颜色的数组
+    
     labPredicted= rgb_to_lab(avg_colors)  # 转换为Lab颜色空间
     labOutput = rgb_to_lab(IDEAL_RGB)  # 转换为Lab颜色空间
-    labPredicted=labPredicted
-    labOutput=labOutput
+
     sumTmp=np.sqrt(np.sum((labPredicted - labOutput)**2,axis=1))
     error = np.mean(sumTmp)  # MSE误差
     # error=np.sqrt(np.sum((avg_colors - IDEAL_LINEAR_RGB)**2,axis=1))
     return error
-def calColorErrorE2000(img, area):
-    """计算色块与理想颜色的 CIE 2000 Delta E 差异"""
-    avg_colors = []
-    for (x1, y1, x2, y2) in area:
-        patch = img[y1:y2, x1:x2]
-        R_mean = np.mean(patch[:, :, 0])  # 注意：OpenCV 默认是 BGR，这里假设你的 img 是 RGB
-        G_mean = np.mean(patch[:, :, 1])
-        B_mean = np.mean(patch[:, :, 2])
-        avg_colors.append([R_mean, G_mean, B_mean])
-    
-    # 转换为 sRGBColor 对象（需归一化到 0-1）
-    avg_colors = np.array(avg_colors)   # 假设输入是 0-255
-    ideal_rgb = np.array(IDEAL_RGB)     # 理想颜色也需归一化
-
-    # 计算每个色块的 Delta E 2000
-    delta_es = []
-    for rgb,target_rgb in zip(avg_colors,IDEAL_RGB):
-        # 创建颜色对象（sRGB → Lab）
-        color = sRGBColor(rgb[0], rgb[1], rgb[2], is_upscaled=True)
-        target = sRGBColor(target_rgb[0], target_rgb[1], target_rgb[2], is_upscaled=True)
-        color_lab = convert_color(color, LabColor)
-        target_lab = convert_color(target, LabColor)
-        
-        # 计算 Delta E 2000
-        delta_es.append(delta_e_cie2000(color_lab, target_lab))
-    print(f"delta_es: {delta_es}...")
-    return np.sum(delta_es)
-
 def autoFitAwb(image_folder,lscyamlFolder):
     fixGreen= False
     @timeit
@@ -814,7 +790,7 @@ def autoFitAwb(image_folder,lscyamlFolder):
     
     full_paths, basenames = get_paths(image_folder,suffix=".raw")
     #no d50 d75
-    area=[[670, 670, 930, 930], [1160, 670, 1420, 930], [1650, 670, 1910, 930], [2140, 670, 2400, 930], [2630, 670, 2890, 930], [3120, 670, 3380, 930], [670, 1160, 930, 1420], [1160, 1160, 1420, 1420], [1650, 1160, 1910, 1420], [2140, 1160, 2400, 1420], [2630, 1160, 2890, 1420], [3120, 1160, 3380, 1420], [670, 1650, 930, 1910], [1160, 1650, 1420, 1910], [1650, 1650, 1910, 1910], [2140, 1650, 2400, 1910], [2630, 1650, 2890, 1910], [3120, 1650, 3380, 1910], [670, 2140, 930, 2400], [1160, 2140, 1420, 2400], [1650, 2140, 1910, 2400], [2140, 2140, 2400, 2400], [2630, 2140, 2890, 2400], [3120, 2140, 3380, 2400]]
+    area=[[709, 692, 929, 912], [1194, 692, 1414, 912], [1679, 692, 1899, 912], [2164, 692, 2384, 912], [2649, 692, 2869, 912], [3134, 692, 3354, 912], [709, 1177, 929, 1397], [1194, 1177, 1414, 1397], [1679, 1177, 1899, 1397], [2164, 1177, 2384, 1397], [2649, 1177, 2869, 1397], [3134, 1177, 3354, 1397], [709, 1662, 929, 1882], [1194, 1662, 1414, 1882], [1679, 1662, 1899, 1882], [2164, 1662, 2384, 1882], [2649, 1662, 2869, 1882], [3134, 1662, 3354, 1882], [709, 2147, 929, 2367], [1194, 2147, 1414, 2367], [1679, 2147, 1899, 2367], [2164, 2147, 2384, 2367], [2649, 2147, 2869, 2367], [3134, 2147, 3354, 2367]]
     #d50 
     # area=[[628, 537, 888, 797], [1133, 537, 1393, 797], [1638, 537, 1898, 797], [2143, 537, 2403, 797], [2648, 537, 2908, 797], [3153, 537, 3413, 797], [628, 1042, 888, 1302], [1133, 1042, 1393, 1302], [1638, 1042, 1898, 1302], [2143, 1042, 2403, 1302], [2648, 1042, 2908, 1302], [3153, 1042, 3413, 1302], [628, 1547, 888, 1807], [1133, 1547, 1393, 1807], [1638, 1547, 1898, 1807], [2143, 1547, 2403, 1807], [2648, 1547, 2908, 1807], [3153, 1547, 3413, 1807], [628, 2052, 888, 2312], [1133, 2052, 1393, 2312], [1638, 2052, 1898, 2312], [2143, 2052, 2403, 2312], [2648, 2052, 2908, 2312], [3153, 2052, 3413, 2312]]
     #d75
@@ -869,7 +845,7 @@ def autoFitAwb(image_folder,lscyamlFolder):
             x,  
             args=(imgLSC,area,fixGreen),
             # constraints=constraints,
-            bounds=bounds,
+            # bounds=bounds,
             method='Nelder-Mead',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
             options={'maxiter': 10000,'disp': True}
         )
@@ -1057,6 +1033,9 @@ def autoFitLsc(image_folder):
 def main():
    
     # autoFitLsc(folderPath)
+
+    # error=rgbError_detalE2000(IDEAL_RGB,ColorCheckerRGB)
+    # print(f"初始色彩误差(2000): {error}")
 
     folderPath= r'C:\WorkSpace\serialPortVisualization\data\1016_671\24nod50d75'
     lscyamlFolder= r'C:\WorkSpace\serialPortVisualization\data\1016_G12_LSC'

@@ -3,15 +3,15 @@ import matplotlib.pyplot as plt
 from tools import readRaw
 # 1. 读取一张图像
 # image = cv2.imread(r'C:\WorkSpace\serialPortVisualization\data\g07s5ColorChecker\demosaicResults\A.jpg')
-image_path=r'C:\WorkSpace\serialPortVisualization\data\1016_671\24\671-D65.raw'
+image_path=r'C:\WorkSpace\serialPortVisualization\data\1016_671\24\671-A.raw'
 image=readRaw(image_path,3072,4096)
 # 将BGR格式转换为RGB格式（Matplotlib使用RGB）
 image_rgb = image
 # image_rgb = cv2.cvtColor(image, cv2.IMREAD_UNCHANGED)
 
 # 2. 定义矩形的参数s
-boxSize = 260
-interval = 220
+boxSize = 220
+interval = 265
 
 # 起始坐标（第一个方块的左上角）
 start_x =709
