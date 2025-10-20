@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-简化版模块化ISP流水线
-实用且易于理解的实现
-"""
+
 
 import numpy as np
 from typing import Dict, List, Optional, Any
 import time
 import cv2
-class SimpleISPModule:
+class ISPModule:
     """简化的ISP模块基类"""
     
     def __init__(self, name: str, enabled: bool = True):
@@ -29,32 +26,34 @@ class SimpleISPModule:
         """获取参数"""
         return self.params.get(key, default)
 
-class BLCModule(SimpleISPModule):
+class BLCModule(ISPModule):
     """黑电平校正模块"""
     
-    def __init__(self, blc_value: int = 64):
+    def __init__(self, blc_value: int = 64,raw_bit: int = 10):
         super().__init__("BLC")
         self.set_param("blc_value", blc_value)
     
     def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
         blc_value = self.get_param("blc_value")
+        raw_bit = self.get_param("raw_bit")
         result = image - blc_value
-        return np.clip(result, 0, 1023).astype(np.float64)
+        return np.clip(result, 0, raw_bit).astype(np.float32)
 
-class LSCModule(SimpleISPModule):
+class LSCModule(ISPModule):
     """镜头阴影校正模块"""
     
-    def __init__(self, gain_map: Optional[np.ndarray] = None):
+    def __init__(self, gain_map: Optional[np.ndarray] = None, raw_bit: int = 10):
         super().__init__("LSC")
         self.set_param("gain_map", gain_map)
-    
+        self.set_param("raw_bit", raw_bit)
     def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
         gain_map = self.get_param("gain_map")
+        raw_bit = self.get_param("raw_bit")
         if gain_map is None:
             return image
-        return np.clip(image * gain_map, 0, 1023).astype(np.float64)
+        return np.clip(image * gain_map, 0, raw_bit).astype(np.float32)
 
-class AWBModule(SimpleISPModule):
+class AWBRgbModule(ISPModule):
     """白平衡模块"""
     
     def __init__(self, r_gain: float = 1.0, g_gain: float = 1.0, b_gain: float = 1.0):
@@ -68,13 +67,53 @@ class AWBModule(SimpleISPModule):
         g_gain = self.get_param("g_gain")
         b_gain = self.get_param("b_gain")
         
-        result = image.copy()
-        result[:, :, 0] *= b_gain
-        result[:, :, 1] *= g_gain
-        result[:, :, 2] *= r_gain
-        return np.clip(result, 0, 1)
-
-class DemosaicModule(SimpleISPModule):
+        image[:, :, 0] *= b_gain
+        image[:, :, 1] *= g_gain
+        image[:, :, 2] *= r_gain
+        return np.clip(image, 0, 1)
+class AWBRawModule(ISPModule):
+    """白平衡模块"""
+    
+    def __init__(self, bayer_pattern: str = "BGGR",raw_bit: int = 10,r_gain: float = 1.0, g_gain: float = 1.0, b_gain: float = 1.0):
+        super().__init__("AWB")
+        self.set_param("bayer_pattern", bayer_pattern)
+        self.set_param("raw_bit", raw_bit)
+        self.set_param("r_gain", r_gain)
+        self.set_param("g_gain", g_gain)
+        self.set_param("b_gain", b_gain)
+    
+    def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
+        r_gain = self.get_param("r_gain")
+        g_gain = self.get_param("g_gain")
+        b_gain = self.get_param("b_gain")
+        bayer_pattern = self.get_param("bayer_pattern")
+        raw_bit = self.get_param("raw_bit")
+        match bayer_pattern:
+            case "BGGR":
+                result[1::2, 1::2] *= b_gain
+                result[::2, 1::2] *= g_gain
+                result[1::2, ::2] *= g_gain
+                result[::2, ::2] *= r_gain
+            case "RGGB":
+                result[::2, ::2] *= b_gain
+                result[1::2, ::2] *= g_gain
+                result[::2, 1::2] *= g_gain
+                result[1::2, 1::2] *= r_gain
+            case "GBRG":
+                result[::2, ::2] *= b_gain
+                result[1::2, ::2] *= g_gain
+                result[::2, 1::2] *= g_gain
+                result[1::2, 1::2] *= r_gain
+            case "GRBG":
+                result[1::2, ::2] *= b_gain
+                result[::2, ::2] *= g_gain
+                result[1::2, 1::2] *= g_gain
+                result[::2, 1::2] *= r_gain
+            case _:
+                raise ValueError(f"Unsupported bayer pattern: {bayer_pattern}")
+    
+        return np.clip(result, 0, raw_bit)
+class DemosaicModule(ISPModule):
     """去马赛克模块"""
     
     def __init__(self, bayer_pattern: str = "BGGR"):
@@ -82,7 +121,7 @@ class DemosaicModule(SimpleISPModule):
         self.set_param("bayer_pattern", bayer_pattern)
     
     def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
-        """简化的去马赛克实现"""
+     
         bayer_pattern = self.get_param("bayer_pattern")
         match bayer_pattern:
             case "BGGR":
@@ -97,7 +136,22 @@ class DemosaicModule(SimpleISPModule):
                 raise ValueError(f"Unsupported bayer pattern: {bayer_pattern}")
         return rgb.astype(np.float32)
 
-class GammaModule(SimpleISPModule):
+class CCMModule(ISPModule):
+    """颜色校正矩阵模块"""
+    
+    def __init__(self, ccm_matrix: Optional[np.ndarray] = None):
+        super().__init__("CCM")
+        self.set_param("ccm_matrix", ccm_matrix)
+
+    def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
+        ccm_matrix = self.get_param("ccm_matrix")
+        h, w = image.shape[:2] #H*W*3
+        result = image.reshape(-1, 3) # (h*w, 3)
+        np.dot(result, ccm_matrix.T,out=result)  # 等价于 (ccm @ rgb_flat.T).T
+        result = result.reshape(h, w, 3)
+        return np.clip(result, 0, 1)
+    
+class GammaModule(ISPModule):
     """Gamma校正模块"""
     
     def __init__(self, gamma: float = 2.2):
@@ -117,18 +171,18 @@ class SimpleISPPipeline:
     
     def __init__(self, name: str = "Simple_ISP_Pipeline"):
         self.name = name
-        self.modules: List[SimpleISPModule] = []
+        self.modules: List[ISPModule] = []
         self.processing_times = {}
     
-    def add_module(self, module: SimpleISPModule):
+    def add_module(self, module: ISPModule):
         """添加模块"""
         self.modules.append(module)
-        print(f"添加模块: {module.name}")
+        print(f"add module: {module.name}")
     
     def remove_module(self, module_name: str):
         """移除模块"""
         self.modules = [m for m in self.modules if m.name != module_name]
-        print(f"移除模块: {module_name}")
+        print(f"remove module: {module_name}")
     
     def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
         """处理图像"""
@@ -152,7 +206,7 @@ class SimpleISPPipeline:
         
         return result
     
-    def get_module(self, module_name: str) -> Optional[SimpleISPModule]:
+    def get_module(self, module_name: str) -> Optional[ISPModule]:
         """获取模块"""
         for module in self.modules:
             if module.name == module_name:
@@ -176,14 +230,14 @@ class SimpleISPPipeline:
             print(f"{module_name:15s}: {time_taken:.4f}s")
         print("=" * 40)
 
-def create_standard_pipeline() -> SimpleISPPipeline:
+def create_raw_pipeline() -> SimpleISPPipeline:
     """创建标准流水线"""
-    pipeline = SimpleISPPipeline("标准ISP流水线")
+    pipeline = SimpleISPPipeline("raw pipeline")
     
     # 添加标准模块
     pipeline.add_module(BLCModule(blc_value=64))
     pipeline.add_module(LSCModule())
-    pipeline.add_module(AWBModule(r_gain=1.2, g_gain=1.0, b_gain=0.8))
+    pipeline.add_module(AWBRgbModule(r_gain=1.2, g_gain=1.0, b_gain=0.8))
     pipeline.add_module(DemosaicModule(bayer_pattern="BGGR"))
     pipeline.add_module(GammaModule(gamma=2.2))
     
@@ -206,7 +260,7 @@ if __name__ == "__main__":
     print("=" * 50)
     
     # 创建流水线
-    pipeline = create_standard_pipeline()
+    pipeline = create_raw_pipeline()
     pipeline.print_pipeline_info()
     
     # 创建测试图像
