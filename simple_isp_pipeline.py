@@ -6,165 +6,275 @@ import numpy as np
 from typing import Dict, List, Optional, Any
 import time
 import cv2
+from dataclasses import dataclass
+
+@dataclass
+class FrameMeta:
+    width: int = 0
+    height: int = 0
+    raw_bit: int = 10
+    bayer_pattern: str = "RGGB"
+    wb_gain: Dict[str, float] = None
+    ccm_matrix: Any = None
+    gamma: float = 2.2
+    blc_value: int = 64
+    lsc_gain: Dict[str, np.ndarray] = None
+    
+   
+
+@dataclass
+class FrameData:
+    """
+    图像帧数据，包含图像本身和元信息
+    """
+    image: np.ndarray
+    meta: FrameMeta
+
 class ISPModule:
     """简化的ISP模块基类"""
     
-    def __init__(self, name: str, enabled: bool = True):
+    def __init__(self, name: str):
         self.name = name
-        self.enabled = enabled
-        self.params = {}
     
-    def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
+    def process(self, frame_data: FrameData, **kwargs) -> FrameData:
         """处理图像 - 子类需要重写此方法"""
-        return image
+        return frame_data
+class ReadRawModule(ISPModule):
+    """raw图读取模块"""
     
-    def set_param(self, key: str, value: Any):
-        """设置参数"""
-        self.params[key] = value
+    def __init__(self):
+        super().__init__("READRAW")
     
-    def get_param(self, key: str, default: Any = None):
-        """获取参数"""
-        return self.params.get(key, default)
+    def process(self, frame_data: FrameData, **kwargs) -> FrameData:
+        meta = frame_data.meta
+        imgData = np.fromfile(kwargs.get('image_path', ''), dtype=np.uint16)
+        imgData = imgData.reshape(meta.height, meta.width)
+        result = np.clip(imgData, 0, meta.raw_bit).astype(np.float32)
+        
+        return FrameData(image=result, meta=meta)
 
 class BLCModule(ISPModule):
     """黑电平校正模块"""
     
-    def __init__(self, blc_value: int = 64,raw_bit: int = 10):
+    def __init__(self):
         super().__init__("BLC")
-        self.set_param("blc_value", blc_value)
     
-    def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
-        blc_value = self.get_param("blc_value")
-        raw_bit = self.get_param("raw_bit")
-        result = image - blc_value
-        return np.clip(result, 0, raw_bit).astype(np.float32)
+    def process(self, frame_data: FrameData, **kwargs) -> FrameData:
+        meta = frame_data.meta
+        # 从 FrameMeta 直接获取黑电平参数
+        blc_value = meta.blc_value
+        result = frame_data.image - blc_value
+        result = np.clip(result, 0, meta.raw_bit)
+        
+        return FrameData(image=result, meta=meta)
 
-class LSCModule(ISPModule):
+class LSCRawModule(ISPModule):
     """镜头阴影校正模块"""
     
-    def __init__(self, gain_map: Optional[np.ndarray] = None, raw_bit: int = 10):
-        super().__init__("LSC")
-        self.set_param("gain_map", gain_map)
-        self.set_param("raw_bit", raw_bit)
-    def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
-        gain_map = self.get_param("gain_map")
-        raw_bit = self.get_param("raw_bit")
+    def __init__(self):
+        super().__init__("LSCRAW")
+    
+    def process(self, frame_data: FrameData, **kwargs) -> FrameData:
+        meta = frame_data.meta
+        image = frame_data.image
+        
+        # 从 FrameMeta 直接获取增益图
+        gain_map = meta.lsc_gain
         if gain_map is None:
-            return image
-        return np.clip(image * gain_map, 0, raw_bit).astype(np.float32)
+            return frame_data
+            
+        rows, cols = image.shape[:2]
+        gain_R = gain_map['R']
+        gain_Gr = gain_map['Gr']
+        gain_Gb = gain_map['Gb']
+        gain_B = gain_map['B']
+        m = len(gain_R) - 1
+        n = len(gain_R[0]) - 1
+        bayer_mask = self.generate_bayer_mask(rows, cols, pattern=meta.bayer_pattern)
+        
+        # 块边界
+        block_heights = np.linspace(0, rows, m+1, dtype=int)
+        block_widths = np.linspace(0, cols, n+1, dtype=int)
 
+        y_coords, x_coords = np.indices((rows, cols))
+        i_indices = np.searchsorted(block_heights, y_coords, side='right') - 1
+        j_indices = np.searchsorted(block_widths, x_coords, side='right') - 1
+        i_indices = np.clip(i_indices, 0, m-1)
+        j_indices = np.clip(j_indices, 0, n-1)
+
+        # 归一化坐标（避免除零）
+        h_diff = (block_heights[i_indices+1] - block_heights[i_indices]).astype(float)
+        w_diff = (block_widths[j_indices+1] - block_widths[j_indices]).astype(float)
+        h_diff[h_diff == 0] = 1
+        w_diff[w_diff == 0] = 1
+        y_norm = (y_coords - block_heights[i_indices]) / h_diff
+        x_norm = (x_coords - block_widths[j_indices]) / w_diff
+
+        # 输出增益图
+        gains = np.zeros_like(image, dtype=float)
+
+        # 遍历通道 (整数编码)
+        for color_id, mesh in [(0, gain_R), (1, gain_Gr), (2, gain_Gb), (3, gain_B)]:
+            mask = (bayer_mask == color_id)
+            if not np.any(mask):
+                continue
+            q11 = mesh[i_indices[mask], j_indices[mask]]
+            q21 = mesh[i_indices[mask], j_indices[mask]+1]
+            q12 = mesh[i_indices[mask]+1, j_indices[mask]]
+            q22 = mesh[i_indices[mask]+1, j_indices[mask]+1]
+            gains[mask] = ((1 - y_norm[mask]) * (1 - x_norm[mask]) * q11 +
+                            (1 - y_norm[mask]) * x_norm[mask] * q21 +
+                            y_norm[mask] * (1 - x_norm[mask]) * q12 +
+                            y_norm[mask] * x_norm[mask] * q22)
+
+        result = np.clip(image * gains, 0, meta.raw_bit)
+        return FrameData(image=result, meta=meta)
+    def generate_bayer_mask(self,rows, cols, pattern='RGGB'):
+        """生成整数编码 Bayer mask"""
+        bayer_mask = np.zeros((rows, cols), dtype=np.uint8)
+        pattern_map = {
+            'RGGB': np.array([[0, 1], [2, 3]], dtype=np.uint8),
+            'BGGR': np.array([[3, 2], [1, 0]], dtype=np.uint8),
+            'GBRG': np.array([[2, 3], [0, 1]], dtype=np.uint8),
+            'GRBG': np.array([[1, 0], [3, 2]], dtype=np.uint8),
+        }
+        if pattern not in pattern_map:
+            raise ValueError(f"Unsupported Bayer pattern: {pattern}")
+        tile = pattern_map[pattern]
+        bayer_mask[::2, ::2] = tile[0,0]
+        bayer_mask[::2, 1::2] = tile[0,1]
+        bayer_mask[1::2, ::2] = tile[1,0]
+        bayer_mask[1::2, 1::2] = tile[1,1]
+        return bayer_mask
 class AWBRgbModule(ISPModule):
     """白平衡模块"""
     
-    def __init__(self, r_gain: float = 1.0, g_gain: float = 1.0, b_gain: float = 1.0):
-        super().__init__("AWB")
-        self.set_param("r_gain", r_gain)
-        self.set_param("g_gain", g_gain)
-        self.set_param("b_gain", b_gain)
+    def __init__(self):
+        super().__init__("AWBRGB")
     
-    def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
-        r_gain = self.get_param("r_gain")
-        g_gain = self.get_param("g_gain")
-        b_gain = self.get_param("b_gain")
+    def process(self, frame_data: FrameData, **kwargs) -> FrameData:
+        meta = frame_data.meta
+        image = frame_data.image.copy()
+        
+        # 从 FrameData 获取白平衡参数
+        r_gain = meta.wb_gain["r"]
+        g_gain = meta.wb_gain["g"]
+        b_gain = meta.wb_gain["b"]
         
         image[:, :, 0] *= b_gain
         image[:, :, 1] *= g_gain
         image[:, :, 2] *= r_gain
-        return np.clip(image, 0, 1)
+        
+        result = np.clip(image, 0, 1)
+        return FrameData(image=result, meta=meta)
 class AWBRawModule(ISPModule):
     """白平衡模块"""
     
-    def __init__(self, bayer_pattern: str = "BGGR",raw_bit: int = 10,r_gain: float = 1.0, g_gain: float = 1.0, b_gain: float = 1.0):
-        super().__init__("AWB")
-        self.set_param("bayer_pattern", bayer_pattern)
-        self.set_param("raw_bit", raw_bit)
-        self.set_param("r_gain", r_gain)
-        self.set_param("g_gain", g_gain)
-        self.set_param("b_gain", b_gain)
+    def __init__(self):
+        super().__init__("AWBRAW")
     
-    def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
-        r_gain = self.get_param("r_gain")
-        g_gain = self.get_param("g_gain")
-        b_gain = self.get_param("b_gain")
-        bayer_pattern = self.get_param("bayer_pattern")
-        raw_bit = self.get_param("raw_bit")
-        match bayer_pattern:
+    def process(self, frame_data: FrameData, **kwargs) -> FrameData:
+        meta = frame_data.meta
+        image = frame_data.image.copy()
+        
+        # 从 FrameData 获取白平衡参数
+        r_gain = meta.wb_gain["r"]
+        g_gain = meta.wb_gain["g"]
+        b_gain = meta.wb_gain["b"]
+        
+        match meta.bayer_pattern:
             case "BGGR":
-                result[1::2, 1::2] *= b_gain
-                result[::2, 1::2] *= g_gain
-                result[1::2, ::2] *= g_gain
-                result[::2, ::2] *= r_gain
+                image[1::2, 1::2] *= b_gain
+                image[::2, 1::2] *= g_gain
+                image[1::2, ::2] *= g_gain
+                image[::2, ::2] *= r_gain
             case "RGGB":
-                result[::2, ::2] *= b_gain
-                result[1::2, ::2] *= g_gain
-                result[::2, 1::2] *= g_gain
-                result[1::2, 1::2] *= r_gain
+                image[::2, ::2] *= r_gain
+                image[1::2, ::2] *= g_gain
+                image[::2, 1::2] *= g_gain
+                image[1::2, 1::2] *= b_gain
             case "GBRG":
-                result[::2, ::2] *= b_gain
-                result[1::2, ::2] *= g_gain
-                result[::2, 1::2] *= g_gain
-                result[1::2, 1::2] *= r_gain
+                image[::2, ::2] *= g_gain
+                image[1::2, ::2] *= b_gain
+                image[::2, 1::2] *= r_gain
+                image[1::2, 1::2] *= g_gain
             case "GRBG":
-                result[1::2, ::2] *= b_gain
-                result[::2, ::2] *= g_gain
-                result[1::2, 1::2] *= g_gain
-                result[::2, 1::2] *= r_gain
+                image[1::2, ::2] *= g_gain
+                image[::2, ::2] *= r_gain
+                image[1::2, 1::2] *= b_gain
+                image[::2, 1::2] *= g_gain
             case _:
-                raise ValueError(f"Unsupported bayer pattern: {bayer_pattern}")
+                raise ValueError(f"Unsupported bayer pattern: {meta.bayer_pattern}")
     
-        return np.clip(result, 0, raw_bit)
+        result = np.clip(image, 0, meta.raw_bit)
+        return FrameData(image=result, meta=meta)
 class DemosaicModule(ISPModule):
     """去马赛克模块"""
     
-    def __init__(self, bayer_pattern: str = "BGGR"):
+    def __init__(self):
         super().__init__("Demosaic")
-        self.set_param("bayer_pattern", bayer_pattern)
     
-    def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
-     
-        bayer_pattern = self.get_param("bayer_pattern")
-        match bayer_pattern:
+    def process(self, frame_data: FrameData, **kwargs) -> FrameData:
+        meta = frame_data.meta
+        image = frame_data.image
+        
+        match meta.bayer_pattern:
             case "BGGR":
-                rgb=cv2.cvtColor(image, cv2.COLOR_BAYER_BGGR2RGB)
+                rgb = cv2.cvtColor(image.astype(np.uint16), cv2.COLOR_BAYER_BGGR2RGB)
             case "RGGB":
-                rgb=cv2.cvtColor(image, cv2.COLOR_BAYER_RGGB2RGB)
+                rgb = cv2.cvtColor(image.astype(np.uint16), cv2.COLOR_BAYER_RGGB2RGB)
             case "GBRG":
-                rgb=cv2.cvtColor(image, cv2.COLOR_BAYER_GBRG2RGB)
+                rgb = cv2.cvtColor(image.astype(np.uint16), cv2.COLOR_BAYER_GBRG2RGB)
             case "GRBG":
-                rgb=cv2.cvtColor(image, cv2.COLOR_BAYER_GRBG2RGB)
+                rgb = cv2.cvtColor(image.astype(np.uint16), cv2.COLOR_BAYER_GRBG2RGB)
             case _:
-                raise ValueError(f"Unsupported bayer pattern: {bayer_pattern}")
-        return rgb.astype(np.float32)
+                raise ValueError(f"Unsupported bayer pattern: {meta.bayer_pattern}")
+        
+        result = rgb.astype(np.float32)
+        return FrameData(image=result, meta=meta)
 
 class CCMModule(ISPModule):
     """颜色校正矩阵模块"""
     
-    def __init__(self, ccm_matrix: Optional[np.ndarray] = None):
+    def __init__(self):
         super().__init__("CCM")
-        self.set_param("ccm_matrix", ccm_matrix)
 
-    def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
-        ccm_matrix = self.get_param("ccm_matrix")
-        h, w = image.shape[:2] #H*W*3
-        result = image.reshape(-1, 3) # (h*w, 3)
-        np.dot(result, ccm_matrix.T,out=result)  # 等价于 (ccm @ rgb_flat.T).T
+    def process(self, frame_data: FrameData, **kwargs) -> FrameData:
+        meta = frame_data.meta
+        image = frame_data.image
+        
+        # 从 FrameData 获取 CCM 矩阵
+        ccm_matrix = meta.ccm_matrix
+        if ccm_matrix is None:
+            return frame_data
+            
+        h, w = image.shape[:2]  # H*W*3
+        result = image.reshape(-1, 3)  # (h*w, 3)
+        np.dot(result, ccm_matrix.T, out=result)  # 等价于 (ccm @ rgb_flat.T).T
         result = result.reshape(h, w, 3)
-        return np.clip(result, 0, 1)
+        result = np.clip(result, 0, 1)
+        
+        return FrameData(image=result, meta=meta)
     
 class GammaModule(ISPModule):
     """Gamma校正模块"""
     
-    def __init__(self, gamma: float = 2.2):
+    def __init__(self):
         super().__init__("Gamma")
-        self.set_param("gamma", gamma)
     
-    def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
-        gamma = self.get_param("gamma")
+    def process(self, frame_data: FrameData, **kwargs) -> FrameData:
+        meta = frame_data.meta
+        image = frame_data.image
+        
+        # 从 FrameMeta 直接获取 gamma 参数
+        gamma = meta.gamma
         gamma_exp = 1.0 / gamma
         
         mask = image <= 0.0031308
         result = np.where(mask, image * 12.92, 1.055 * (image ** gamma_exp) - 0.055)
-        return np.clip(result, 0, 1)
+        result = np.clip(result, 0, 1)
+        
+        return FrameData(image=result, meta=meta)
 
 class SimpleISPPipeline:
     """简化的ISP流水线"""
@@ -184,17 +294,13 @@ class SimpleISPPipeline:
         self.modules = [m for m in self.modules if m.name != module_name]
         print(f"remove module: {module_name}")
     
-    def process(self, image: np.ndarray, **kwargs) -> np.ndarray:
+    def process(self, frame_data: FrameData, **kwargs) -> FrameData:
         """处理图像"""
-        result = image.copy()
+        result = frame_data
         
-        print(f"开始处理图像: {image.shape}")
+        print(f"开始处理图像: {frame_data.image.shape}")
         
         for module in self.modules:
-            if not module.enabled:
-                print(f"跳过模块: {module.name} (已禁用)")
-                continue
-            
             start_time = time.time()
             result = module.process(result, **kwargs)
             end_time = time.time()
@@ -218,8 +324,7 @@ class SimpleISPPipeline:
         print(f"\n流水线: {self.name}")
         print("=" * 40)
         for i, module in enumerate(self.modules):
-            status = "启用" if module.enabled else "禁用"
-            print(f"{i+1:2d}. {module.name:15s} - {status}")
+            print(f"{i+1:2d}. {module.name:15s}")
         print("=" * 40)
     
     def print_performance(self):
@@ -235,25 +340,16 @@ def create_raw_pipeline() -> SimpleISPPipeline:
     pipeline = SimpleISPPipeline("raw pipeline")
     
     # 添加标准模块
-    pipeline.add_module(BLCModule(blc_value=64))
-    pipeline.add_module(LSCModule())
-    pipeline.add_module(AWBRgbModule(r_gain=1.2, g_gain=1.0, b_gain=0.8))
-    pipeline.add_module(DemosaicModule(bayer_pattern="BGGR"))
-    pipeline.add_module(GammaModule(gamma=2.2))
+    # pipeline.add_module(ReadRawModule())
+    pipeline.add_module(BLCModule())
+    pipeline.add_module(LSCRawModule())
+    pipeline.add_module(AWBRawModule())
+    pipeline.add_module(DemosaicModule())
+    pipeline.add_module(CCMModule())
+    pipeline.add_module(GammaModule())
     
     return pipeline
-
-def create_minimal_pipeline() -> SimpleISPPipeline:
-    """创建最小流水线"""
-    pipeline = SimpleISPPipeline("最小ISP流水线")
     
-    # 只添加基本模块
-    pipeline.add_module(BLCModule(blc_value=64))
-    pipeline.add_module(DemosaicModule(bayer_pattern="BGGR"))
-    pipeline.add_module(GammaModule(gamma=2.2))
-    
-    return pipeline
-
 # 使用示例
 if __name__ == "__main__":
     print("简化版模块化ISP流水线")
@@ -263,13 +359,26 @@ if __name__ == "__main__":
     pipeline = create_raw_pipeline()
     pipeline.print_pipeline_info()
     
-    # 创建测试图像
-    test_image = np.random.randint(0, 1024, (100, 100, 3), dtype=np.uint16)
-    print(f"\n测试图像: {test_image.shape}")
+    # 创建测试图像和元数据
+    test_image = np.random.randint(0, 1024, (1944, 2592), dtype=np.int16)
+    test_image = test_image.astype(np.float32)  
+    meta = FrameMeta(
+        width=100,
+        height=100,
+        raw_bit=10,
+        bayer_pattern="RGGB",
+        wb_gain={"r": 1.2, "g": 1.0, "b": 0.8},
+        gamma=2.2,
+        blc_value=64,
+        lsc_gain=None  # 可以设置为实际的增益图
+    )
+    frame_data = FrameData(image=test_image, meta=meta)
+    
+    print(f"\n测试图像: {frame_data.image.shape}")
     
     # 处理图像
-    result = pipeline.process(test_image)
-    print(f"处理结果: {result.shape}")
+    result = pipeline.process(frame_data)
+    print(f"处理结果: {result.image.shape}")
     
     # 显示性能
     pipeline.print_performance()
@@ -277,20 +386,12 @@ if __name__ == "__main__":
     # 演示模块管理
     print("\n模块管理演示:")
     
-    # 禁用某个模块
-    gamma_module = pipeline.get_module("Gamma")
-    if gamma_module:
-        gamma_module.enabled = False
-        print("禁用Gamma模块")
-    
-    # 修改模块参数
-    awb_module = pipeline.get_module("AWB")
-    if awb_module:
-        awb_module.set_param("r_gain", 1.5)
-        print("修改AWB模块参数")
+    # 修改 FrameData 中的参数
+    frame_data.meta.wb_gain["r"] = 1.5
+    print("修改白平衡参数")
     
     # 重新处理
-    result2 = pipeline.process(test_image)
+    result2 = pipeline.process(frame_data)
     pipeline.print_performance()
     
     print("\n简化版ISP流水线演示完成！")

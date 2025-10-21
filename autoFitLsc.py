@@ -406,7 +406,6 @@ class CCM_3x3:
         #predicted.shape=(3,24)
         #output.shape=(3,24)
 
-        # print('predicted',predicted.shape,output.shape)
         error=rgbError_detalE2000(predicted.T,output.T)
         return error
         sumTmp=np.sum((predicted - output)**2,axis=0)

@@ -1,11 +1,11 @@
 import numpy as np
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
-import matplotlib as mpl
+import matplotlib 
 import inspect
 from tools import *
-
-mpl.rcParams['font.family'] = 'Microsoft YaHei'
+from piecewise_Line import piecewise_Line
+matplotlib.rcParams['font.family'] = 'Microsoft YaHei'
 
 # 指数衰减函数: a * e^(-k*x) + c
 def func_exp(x, a, k, c):
@@ -16,7 +16,7 @@ def mix_exp_linear(x, a1, k1,a2, k2, b1, b2):
     return a1 * np.exp(-k1 * x)  + a2 * np.exp(-k2 * x)+ b1 * x + b2
 
 def mix_exp_linear_plus(x, a1, k1,a2, k2, b2):
-    return a1 * np.exp(-k1 * x)  + a2 * np.exp(-k2 * x)+ b2
+    return a1 * np.exp(k1 * x)  + a2 * np.exp(k2 * x)+ b2
 # 以2为底的指数衰减函数: a * 2^(-k*x) + c 
 def func_exp2(x, a, k, c):
     return a * 2**(-k * x) + c
@@ -38,7 +38,10 @@ def func_1_x(x, a, b, c):
 
 def func_1_r2_r4(x, a, b,c ):
     return 1+ a * x + b * x**3+c* x**4
-
+def func_log_a_b(x, a, b):
+    return a * np.log(x) + b
+def multi_log_a_b(x, a, b,c,):
+    return a * np.log(x) + b * np.log(x)+c
 def curveFit(data,func):
     # 获取函数的参数信息
     sig = inspect.signature(func)
@@ -199,7 +202,6 @@ def valueCal(x, *params,func):
     plt.plot(x, y, 'r-', )
     print(f"x: {x.tolist()}")  # 打印每个点的坐标  
     y=regularizeData(y)  # 对x进行正则化处理
-
     print(f"y: {y.astype(int).tolist()}") 
     plt.legend()
     plt.show()
@@ -240,39 +242,42 @@ def main():
     # processLSC(folderPath)   
 
     '''参数拟合部分'''
-    data=np.array([[3174,2800],
-                   [3232,2800],
-                   [3242,2800],
-                   [3270,2800],
-                   [3894,3500],
-                   [3856,3500],
-                   [3910,3500],
-                   [3904,3500],
-                   [4369,4000],
-                   [4448,4000],
-                   [4469,4000],
-                   [4409,4000],
-                   [5243,5000],
-                   [5158,5000],
-                   [5258,5000],
-                   [5108,5000],
-                   [5951,6000],
-                   [5937,6000],
-                   [5703,6000],
-                   [5860,6000],
-                
-                
+    data=np.array([[4393,68],
+                   [2173,63],
+                   [4668,68],
+                   [1781,61],
+                   [929,62],
+                   [3363,70],
+                   [4020,68],
+                   [1400,60],
+                   [10000,72],
+                   [500,56],
+                  
+                #    [0.1,52],
+           
+
     ])
-    params=curveFit(data,func=func_quad)
+             
+   
+    params=curveFit(data,func=func_sqrt)
+
     """"
     计算给定x值的拟合曲线y值
     """
     x=[]
-    for i in range(0,10,1):
-        x.append(i/10)
+    for i in range(100,10100,100):
+        x.append(i)
     x=np.array(x)
+    y=func_sqrt(x,*params)
+    
+    y=np.array(y)
+    data1=np.column_stack((x,y))
+    pl=piecewise_Line(data1,5)
+    pl.curvefit()
+    pl.show()
+    # print(data1)
     # a, b, c = 36984.00,0.41,3431.71
-    valueCal(x,*params,func=func_quad)
+    valueCal(x,*params,func=func_sqrt)
 
 main()
 
