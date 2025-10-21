@@ -7,19 +7,18 @@ from typing import Dict, List, Optional, Any
 import time
 import cv2
 from dataclasses import dataclass
-
+import matplotlib.pyplot as plt
 @dataclass
 class FrameMeta:
     width: int = 0
     height: int = 0
     raw_bit: int = 10
     bayer_pattern: str = "RGGB"
-    
     blc_value: int = 64
     color_temperature: float = 6500
-    lsc_gain: Dict[str, Dict[str, np.ndarray]] = None
-    wb_gain:Dict[str,Dict[str,float]]=None
-    ccm_matrix: Dict[str, np.ndarray] = None 
+    lsc_gain: Dict[int, Dict[str, np.ndarray]] = None
+    wb_gain:Dict[int,Dict[str,float]]=None
+    ccm_matrix: Dict[int, np.ndarray] = None 
     gamma: float = 2.2
 
 @dataclass
@@ -47,11 +46,11 @@ class ReadRawModule(ISPModule):
     
     def process(self, frame_data: FrameData, **kwargs) -> FrameData:
         meta = frame_data.meta
-        imgData = np.fromfile(kwargs.get('image_path', ''), dtype=np.uint16)
+        imgData = np.fromfile(kwargs.get('image_path', ''), dtype='uint16')
         imgData = imgData.reshape(meta.height, meta.width)
-        result = np.clip(imgData, 0, meta.raw_bit).astype(np.float32)
+        result = np.clip(imgData, 0, 2**meta.raw_bit-1).astype(np.float32)
         
-        return FrameData(image=result, meta=meta)
+        return result
 
 class BLCModule(ISPModule):
     """黑电平校正模块"""
@@ -64,7 +63,7 @@ class BLCModule(ISPModule):
         # 从 FrameMeta 直接获取黑电平参数
         blc_value = meta.blc_value
         result = frame_data.image - blc_value
-        result = np.clip(result, 0, meta.raw_bit)
+        result = np.clip(result, 0, 2**meta.raw_bit-1)
         
         return FrameData(image=result, meta=meta)
 
@@ -183,7 +182,7 @@ class LSCRawModule(ISPModule):
 
         # 原地操作，减少内存分配
         image *= gains
-        np.clip(image, 0, meta.raw_bit, out=image)
+        np.clip(image, 0, 2**meta.raw_bit-1, out=image)
         return FrameData(image=image, meta=meta)
     def generate_bayer_mask(self,rows, cols, pattern='RGGB'):
         """生成整数编码 Bayer mask"""
@@ -358,7 +357,7 @@ class AWBRawModule(ISPModule):
             case _:
                 raise ValueError(f"Unsupported bayer pattern: {meta.bayer_pattern}")
     
-        result = np.clip(image, 0, meta.raw_bit)
+        result = np.clip(image, 0, 2**meta.raw_bit-1)
         return FrameData(image=result, meta=meta)
 class DemosaicModule(ISPModule):
     """去马赛克模块"""
@@ -383,6 +382,8 @@ class DemosaicModule(ISPModule):
                 raise ValueError(f"Unsupported bayer pattern: {meta.bayer_pattern}")
         
         result = rgb.astype(np.float32)
+        result/=2**meta.raw_bit-1
+        result = np.clip(result, 0, 1)
         return FrameData(image=result, meta=meta)
 
 class CCMModule(ISPModule):
@@ -396,65 +397,41 @@ class CCMModule(ISPModule):
         根据色温插值计算CCM矩阵
         
         Args:
-            ccm_config: CCM矩阵配置字典
+            ccm_config: CCM矩阵配置字典（键为数字）
             target_temp: 目标色温
         
         Returns:
             插值后的CCM矩阵
         """
-        if ccm_config is None or len(ccm_config) < 2:
+        if not ccm_config:
             return None
         
-        # 获取所有色温点（假设已按升序排列，支持字符串键）
-        temps = []
-        for key in ccm_config.keys():
-            if isinstance(key, str):
-                try:
-                    temps.append(float(key))
-                except ValueError:
-                    continue
-            else:
-                temps.append(float(key))
+        # 获取所有色温点（假设已按升序排列）
+        temps = list(ccm_config.keys())
+        
+        if len(temps) == 1:
+            return ccm_config[temps[0]]
         
         # 边界处理
         if target_temp <= temps[0]:
-            # 找到对应的键
-            for key in ccm_config.keys():
-                if (isinstance(key, str) and float(key) == temps[0]) or (not isinstance(key, str) and key == temps[0]):
-                    return ccm_config[key]
-            return list(ccm_config.values())[0]
-        elif target_temp >= temps[-1]:
-            # 找到对应的键
-            for key in ccm_config.keys():
-                if (isinstance(key, str) and float(key) == temps[-1]) or (not isinstance(key, str) and key == temps[-1]):
-                    return ccm_config[key]
-            return list(ccm_config.values())[-1]
+            return ccm_config[temps[0]]
+        if target_temp >= temps[-1]:
+            return ccm_config[temps[-1]]
         
-        # 找到目标色温两侧的色温点
+        # 线性插值
         for i in range(len(temps) - 1):
             if temps[i] <= target_temp <= temps[i + 1]:
-                # 找到对应的键
-                t1_key = None
-                t2_key = None
-                for key in ccm_config.keys():
-                    if (isinstance(key, str) and float(key) == temps[i]) or (not isinstance(key, str) and key == temps[i]):
-                        t1_key = key
-                    if (isinstance(key, str) and float(key) == temps[i + 1]) or (not isinstance(key, str) and key == temps[i + 1]):
-                        t2_key = key
+                t1, t2 = temps[i], temps[i + 1]
+                ccm1, ccm2 = ccm_config[t1], ccm_config[t2]
                 
-                if t1_key is None or t2_key is None:
-                    continue
-                
-                # 计算插值权重 lambda
-                lambda_weight = (target_temp - temps[i]) / (temps[i + 1] - temps[i])
+                # 计算插值权重
+                weight = (target_temp - t1) / (t2 - t1)
                 
                 # 矩阵插值
-                ccm1 = ccm_config[t1_key]
-                ccm2 = ccm_config[t2_key]
-                result = ccm1 + lambda_weight * (ccm2 - ccm1)
-                return result.astype(np.float32)
+                ccm_interp = ccm1 + weight * (ccm2 - ccm1)
+                return ccm_interp.astype(np.float32)
         
-        return list(ccm_config.values())[0]
+        return ccm_config[temps[0]]
 
     def process(self, frame_data: FrameData, **kwargs) -> FrameData:
         meta = frame_data.meta
@@ -579,9 +556,6 @@ if __name__ == "__main__":
     pipeline = create_raw_pipeline()
     pipeline.print_pipeline_info()
     
-    # 创建测试图像和元数据
-    test_image = np.random.randint(0, 1024, (1944, 2592), dtype=np.int16)
-    test_image = test_image.astype(np.float32)  
     
     # 创建色温相关的参数配置（按升序排列）
     # LSC 增益图配置（按色温升序）
@@ -615,9 +589,9 @@ if __name__ == "__main__":
     
     # CCM 矩阵配置（按色温升序）
     ccm_config = {
-        "3000": np.array([[1.2, -0.1, -0.1], [-0.1, 1.1, 0.0], [-0.1, 0.0, 1.1]], dtype=np.float32),
-        "6500": np.eye(3, dtype=np.float32),
-        "10000": np.array([[1.1, 0.0, -0.1], [0.0, 1.0, 0.0], [-0.1, 0.0, 1.2]], dtype=np.float32)
+        3000: np.array([[1.2, -0.1, -0.1], [-0.1, 1.1, 0.0], [-0.1, 0.0, 1.1]], dtype=np.float32),
+        6500: np.eye(3, dtype=np.float32),
+        10000: np.array([[1.1, 0.0, -0.1], [0.0, 1.0, 0.0], [-0.1, 0.0, 1.2]], dtype=np.float32)
     }
     
     meta = FrameMeta(
@@ -632,17 +606,30 @@ if __name__ == "__main__":
         gamma=2.2,
         blc_value=64
     )
-    frame_data = FrameData(image=test_image, meta=meta)
+
+    readModule=ReadRawModule()
+    frame_data = FrameData(image=None, meta=meta)
+
+    # 创建测试图像和元数据
+    image_path=r'C:\WorkSpace\serialPortVisualization\data\g07s5ColorChecker\A.raw'
+    image= readModule.process(frame_data,image_path=image_path)
+    print(image.shape)
+    print(image.min(),image.max())
+    
+    frame_data = FrameData(image=image, meta=meta)
     
     print(f"\n测试图像: {frame_data.image.shape}")
     
     # 处理图像
     result = pipeline.process(frame_data)
+    result.image[...,:]=result.image[...,::-1]
+    # result.image=result.image.astype(np.uint8)
     print(f"处理结果: {result.image.shape}")
-    
+    plt.figure()
+    plt.imshow(result.image)
+    plt.show()
     # 显示性能
     pipeline.print_performance()
-    
     # 演示色温插值功能
     print("\n色温插值演示:")
     
@@ -664,11 +651,10 @@ if __name__ == "__main__":
             ccm_matrix = ccm_module.interpolate_ccm_matrix(frame_data.meta.ccm_matrix, temp)
             if ccm_matrix is not None:
                 print(f"  CCM矩阵: {ccm_matrix[0,0]:.3f}")
-        print()
     
     # 使用5000K色温处理图像
     frame_data.meta.color_temperature = 5000
     result2 = pipeline.process(frame_data)
-    # pipeline.print_performance()
-    
-    print("\n简化版ISP流水线演示完成！")
+    plt.figure()
+    plt.imshow(result2.image)
+    plt.show()
