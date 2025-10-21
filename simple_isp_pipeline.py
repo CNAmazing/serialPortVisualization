@@ -154,25 +154,37 @@ class LSCRawModule(ISPModule):
         y_norm = (y_coords - block_heights[i_indices]) / h_diff
         x_norm = (x_coords - block_widths[j_indices]) / w_diff
 
-        # 输出增益图
-        gains = np.zeros_like(image, dtype=float)
+        # 预分配增益图，避免重复分配
+        gains = np.ones_like(image, dtype=np.float32)
 
-        # 遍历通道 (整数编码)
+        # 优化的双线性插值 - 向量化操作
         for color_id, mesh in [(0, gain_R), (1, gain_Gr), (2, gain_Gb), (3, gain_B)]:
             mask = (bayer_mask == color_id)
             if not np.any(mask):
                 continue
-            q11 = mesh[i_indices[mask], j_indices[mask]]
-            q21 = mesh[i_indices[mask], j_indices[mask]+1]
-            q12 = mesh[i_indices[mask]+1, j_indices[mask]]
-            q22 = mesh[i_indices[mask]+1, j_indices[mask]+1]
-            gains[mask] = ((1 - y_norm[mask]) * (1 - x_norm[mask]) * q11 +
-                            (1 - y_norm[mask]) * x_norm[mask] * q21 +
-                            y_norm[mask] * (1 - x_norm[mask]) * q12 +
-                            y_norm[mask] * x_norm[mask] * q22)
+            
+            # 预计算所有插值系数
+            i_masked = i_indices[mask]
+            j_masked = j_indices[mask]
+            y_norm_masked = y_norm[mask]
+            x_norm_masked = x_norm[mask]
+            
+            # 向量化双线性插值
+            q11 = mesh[i_masked, j_masked]
+            q21 = mesh[i_masked, j_masked + 1]
+            q12 = mesh[i_masked + 1, j_masked]
+            q22 = mesh[i_masked + 1, j_masked + 1]
+            
+            # 使用更高效的插值公式
+            gains[mask] = (q11 + 
+                          (q21 - q11) * x_norm_masked + 
+                          (q12 - q11) * y_norm_masked + 
+                          (q22 - q21 - q12 + q11) * x_norm_masked * y_norm_masked)
 
-        result = np.clip(image * gains, 0, meta.raw_bit)
-        return FrameData(image=result, meta=meta)
+        # 原地操作，减少内存分配
+        image *= gains
+        np.clip(image, 0, meta.raw_bit, out=image)
+        return FrameData(image=image, meta=meta)
     def generate_bayer_mask(self,rows, cols, pattern='RGGB'):
         """生成整数编码 Bayer mask"""
         bayer_mask = np.zeros((rows, cols), dtype=np.uint8)
@@ -505,7 +517,8 @@ class SimpleISPPipeline:
     
     def process(self, frame_data: FrameData, **kwargs) -> FrameData:
         """处理图像"""
-        print(f"开始处理图像: {frame_data.image.shape}")
+        print("=" * 40)
+        print(f"start processing: {frame_data.image.shape}")
         
         for module in self.modules:
             start_time = time.time()
@@ -515,7 +528,8 @@ class SimpleISPPipeline:
             processing_time = end_time - start_time
             self.processing_times[module.name] = processing_time
             
-            print(f"模块 {module.name} 处理完成: {processing_time:.4f}s")
+            print(f"{module.name:15s} : {processing_time:.4f}s")
+        print("=" * 40)
         
         return frame_data
     
@@ -655,6 +669,6 @@ if __name__ == "__main__":
     # 使用5000K色温处理图像
     frame_data.meta.color_temperature = 5000
     result2 = pipeline.process(frame_data)
-    pipeline.print_performance()
+    # pipeline.print_performance()
     
     print("\n简化版ISP流水线演示完成！")
