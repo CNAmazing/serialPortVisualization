@@ -62,10 +62,10 @@ class BLCModule(ISPModule):
         meta = frame_data.meta
         # 从 FrameMeta 直接获取黑电平参数
         blc_value = meta.blc_value
-        result = frame_data.image - blc_value
-        result = np.clip(result, 0, 2**meta.raw_bit-1)
+        frame_data.image -= blc_value  # 原地修改
+        np.clip(frame_data.image, 0, 2**meta.raw_bit-1, out=frame_data.image)
         
-        return FrameData(image=result, meta=meta)
+        return frame_data  # 原地修改，返回原对象
 
 class LSCRawModule(ISPModule):
     """镜头阴影校正模块"""
@@ -183,7 +183,7 @@ class LSCRawModule(ISPModule):
         # 原地操作，减少内存分配
         image *= gains
         np.clip(image, 0, 2**meta.raw_bit-1, out=image)
-        return FrameData(image=image, meta=meta)
+        return frame_data  # 原地修改，返回原对象
     def generate_bayer_mask(self,rows, cols, pattern='RGGB'):
         """生成整数编码 Bayer mask"""
         bayer_mask = np.zeros((rows, cols), dtype=np.uint8)
@@ -264,12 +264,12 @@ class AWBRgbModule(ISPModule):
         g_gain = wb_params["g"]
         b_gain = wb_params["b"]
         
-        image[:, :, 0] *= b_gain
-        image[:, :, 1] *= g_gain
-        image[:, :, 2] *= r_gain
+        frame_data.image[:, :, 0] *= b_gain  # 原地修改
+        frame_data.image[:, :, 1] *= g_gain
+        frame_data.image[:, :, 2] *= r_gain
         
-        result = np.clip(image, 0, 1)
-        return FrameData(image=result, meta=meta)
+        np.clip(frame_data.image, 0, 1, out=frame_data.image)
+        return frame_data  # 原地修改，返回原对象
 class AWBRawModule(ISPModule):
     """白平衡模块"""
     
@@ -335,30 +335,30 @@ class AWBRawModule(ISPModule):
         
         match meta.bayer_pattern:
             case "BGGR":
-                image[1::2, 1::2] *= b_gain
-                image[::2, 1::2] *= g_gain
-                image[1::2, ::2] *= g_gain
-                image[::2, ::2] *= r_gain
+                frame_data.image[1::2, 1::2] *= b_gain  # 原地修改
+                frame_data.image[::2, 1::2] *= g_gain
+                frame_data.image[1::2, ::2] *= g_gain
+                frame_data.image[::2, ::2] *= r_gain
             case "RGGB":
-                image[::2, ::2] *= r_gain
-                image[1::2, ::2] *= g_gain
-                image[::2, 1::2] *= g_gain
-                image[1::2, 1::2] *= b_gain
+                frame_data.image[::2, ::2] *= r_gain
+                frame_data.image[1::2, ::2] *= g_gain
+                frame_data.image[::2, 1::2] *= g_gain
+                frame_data.image[1::2, 1::2] *= b_gain
             case "GBRG":
-                image[::2, ::2] *= g_gain
-                image[1::2, ::2] *= b_gain
-                image[::2, 1::2] *= r_gain
-                image[1::2, 1::2] *= g_gain
+                frame_data.image[::2, ::2] *= g_gain
+                frame_data.image[1::2, ::2] *= b_gain
+                frame_data.image[::2, 1::2] *= r_gain
+                frame_data.image[1::2, 1::2] *= g_gain
             case "GRBG":
-                image[1::2, ::2] *= g_gain
-                image[::2, ::2] *= r_gain
-                image[1::2, 1::2] *= b_gain
-                image[::2, 1::2] *= g_gain
+                frame_data.image[1::2, ::2] *= g_gain
+                frame_data.image[::2, ::2] *= r_gain
+                frame_data.image[1::2, 1::2] *= b_gain
+                frame_data.image[::2, 1::2] *= g_gain
             case _:
                 raise ValueError(f"Unsupported bayer pattern: {meta.bayer_pattern}")
     
-        result = np.clip(image, 0, 2**meta.raw_bit-1)
-        return FrameData(image=result, meta=meta)
+        np.clip(frame_data.image, 0, 2**meta.raw_bit-1, out=frame_data.image)
+        return frame_data  # 原地修改，返回原对象
 class DemosaicModule(ISPModule):
     """去马赛克模块"""
     
@@ -381,10 +381,10 @@ class DemosaicModule(ISPModule):
             case _:
                 raise ValueError(f"Unsupported bayer pattern: {meta.bayer_pattern}")
         
-        result = rgb.astype(np.float32)
-        result/=2**meta.raw_bit-1
-        result = np.clip(result, 0, 1)
-        return FrameData(image=result, meta=meta)
+        frame_data.image = rgb.astype(np.float32)  # 原地修改
+        frame_data.image /= 2**meta.raw_bit-1
+        np.clip(frame_data.image, 0, 1, out=frame_data.image)
+        return frame_data  # 原地修改，返回原对象
 
 class CCMModule(ISPModule):
     """颜色校正矩阵模块"""
@@ -446,13 +446,13 @@ class CCMModule(ISPModule):
             # 确保矩阵是 float32 类型
             ccm_matrix = ccm_matrix.astype(np.float32)
             
-        h, w = image.shape[:2]  # H*W*3
-        result = image.reshape(-1, 3)  # (h*w, 3)
+        h, w = frame_data.image.shape[:2]  # H*W*3
+        result = frame_data.image.reshape(-1, 3)  # (h*w, 3)
         np.dot(result, ccm_matrix.T, out=result)  # 等价于 (ccm @ rgb_flat.T).T
-        result = result.reshape(h, w, 3)
-        result = np.clip(result, 0, 1)
+        frame_data.image = result.reshape(h, w, 3)  # 原地修改
+        np.clip(frame_data.image, 0, 1, out=frame_data.image)
         
-        return FrameData(image=result, meta=meta)
+        return frame_data  # 原地修改，返回原对象
     
 class GammaModule(ISPModule):
     """Gamma校正模块"""
@@ -468,11 +468,11 @@ class GammaModule(ISPModule):
         gamma = meta.gamma
         gamma_exp = 1.0 / gamma
         
-        mask = image <= 0.0031308
-        result = np.where(mask, image * 12.92, 1.055 * (image ** gamma_exp) - 0.055)
-        result = np.clip(result, 0, 1)
+        mask = frame_data.image <= 0.0031308
+        frame_data.image = np.where(mask, frame_data.image * 12.92, 1.055 * (frame_data.image ** gamma_exp) - 0.055)  # 原地修改
+        np.clip(frame_data.image, 0, 1, out=frame_data.image)
         
-        return FrameData(image=result, meta=meta)
+        return frame_data  # 原地修改，返回原对象
 
 class SimpleISPPipeline:
     """简化的ISP流水线"""
@@ -653,8 +653,4 @@ if __name__ == "__main__":
                 print(f"  CCM矩阵: {ccm_matrix[0,0]:.3f}")
     
     # 使用5000K色温处理图像
-    frame_data.meta.color_temperature = 5000
-    result2 = pipeline.process(frame_data)
-    plt.figure()
-    plt.imshow(result2.image)
-    plt.show()
+  
