@@ -8,6 +8,12 @@ import time
 import cv2
 from dataclasses import dataclass
 import matplotlib.pyplot as plt
+
+"""
+    isppipeline
+    =========raw_bit==========||================0-1======================
+    BLC   LSC   AWB   Demosaic||            CCM   Gamma   PP
+"""
 @dataclass
 class FrameMeta:
     width: int = 0
@@ -107,7 +113,7 @@ class LSCRawModule(ISPModule):
                 gain1 = lsc_gain_config[temps[i]]
                 gain2 = lsc_gain_config[temps[i + 1]]
                 
-                for channel in ['R', 'Gr', 'Gb', 'B']:
+                for channel in ['r', 'gr', 'gb', 'b']:
                     if channel in gain1 and channel in gain2:
                         result[channel] = gain1[channel] + lambda_weight * (gain2[channel] - gain1[channel])
                     else:
@@ -127,10 +133,10 @@ class LSCRawModule(ISPModule):
             return frame_data
             
         rows, cols = image.shape[:2]
-        gain_R = gain_map['R']
-        gain_Gr = gain_map['Gr']
-        gain_Gb = gain_map['Gb']
-        gain_B = gain_map['B']
+        gain_R = gain_map['r']
+        gain_Gr = gain_map['gr']
+        gain_Gb = gain_map['gb']
+        gain_B = gain_map['b']
         m = len(gain_R) - 1
         n = len(gain_R[0]) - 1
         bayer_mask = self.generate_bayer_mask(rows, cols, pattern=meta.bayer_pattern)
@@ -462,7 +468,6 @@ class GammaModule(ISPModule):
     
     def process(self, frame_data: FrameData, **kwargs) -> FrameData:
         meta = frame_data.meta
-        image = frame_data.image
         
         # 从 FrameMeta 直接获取 gamma 参数
         gamma = meta.gamma
@@ -471,6 +476,19 @@ class GammaModule(ISPModule):
         mask = frame_data.image <= 0.0031308
         frame_data.image = np.where(mask, frame_data.image * 12.92, 1.055 * (frame_data.image ** gamma_exp) - 0.055)  # 原地修改
         np.clip(frame_data.image, 0, 1, out=frame_data.image)
+        
+        return frame_data  # 原地修改，返回原对象
+class PPModule(ISPModule):
+    """postProcess校正模块"""
+    def __init__(self):
+        super().__init__("PP")
+    
+    def process(self, frame_data: FrameData, **kwargs) -> FrameData:
+        frame_data.image[...,:]=frame_data.image[...,::-1]
+        frame_data.image*=255
+        frame_data.image=frame_data.image.astype(np.uint8)
+        
+        np.clip(frame_data.image, 0, 255, out=frame_data.image)
         
         return frame_data  # 原地修改，返回原对象
 
@@ -506,6 +524,7 @@ class SimpleISPPipeline:
             self.processing_times[module.name] = processing_time
             
             print(f"{module.name:15s} : {processing_time:.4f}s")
+        print(f"totalTime: {sum(self.processing_times.values()):.4f}s")
         print("=" * 40)
         
         return frame_data
@@ -544,7 +563,7 @@ def create_raw_pipeline() -> SimpleISPPipeline:
     pipeline.add_module(DemosaicModule())
     pipeline.add_module(CCMModule())
     pipeline.add_module(GammaModule())
-    
+    pipeline.add_module(PPModule())
     return pipeline
     
 # 使用示例
@@ -561,22 +580,22 @@ if __name__ == "__main__":
     # LSC 增益图配置（按色温升序）
     lsc_gain_config = {
         3000: {  # 暖光
-            "R": np.ones((3, 3)) * 1.1,
-            "Gr": np.ones((3, 3)) * 1.0,
-            "Gb": np.ones((3, 3)) * 1.0,
-            "B": np.ones((3, 3)) * 0.9
+            "r": np.ones((3, 3)) * 1.1,
+            "gr": np.ones((3, 3)) * 1.0,
+            "gb": np.ones((3, 3)) * 1.0,
+            "b": np.ones((3, 3)) * 0.9
         },
         6500: {  # 日光
-            "R": np.ones((3, 3)) * 1.0,
-            "Gr": np.ones((3, 3)) * 1.0,
-            "Gb": np.ones((3, 3)) * 1.0,
-            "B": np.ones((3, 3)) * 1.0
+            "r": np.ones((3, 3)) * 1.0,
+            "gr": np.ones((3, 3)) * 1.0,
+            "gb": np.ones((3, 3)) * 1.0,
+            "b": np.ones((3, 3)) * 1.0
         },
         10000: {  # 冷光
-            "R": np.ones((3, 3)) * 0.9,
-            "Gr": np.ones((3, 3)) * 1.0,
-            "Gb": np.ones((3, 3)) * 1.0,
-            "B": np.ones((3, 3)) * 1.1
+            "r": np.ones((3, 3)) * 0.9,
+            "gr": np.ones((3, 3)) * 1.0,
+            "gb": np.ones((3, 3)) * 1.0,
+            "b": np.ones((3, 3)) * 1.1
         }
     }
     
@@ -622,35 +641,9 @@ if __name__ == "__main__":
     
     # 处理图像
     result = pipeline.process(frame_data)
-    result.image[...,:]=result.image[...,::-1]
-    # result.image=result.image.astype(np.uint8)
-    print(f"处理结果: {result.image.shape}")
     plt.figure()
     plt.imshow(result.image)
     plt.show()
-    # 显示性能
-    pipeline.print_performance()
-    # 演示色温插值功能
-    print("\n色温插值演示:")
     
-    # 测试不同色温
-    test_temps = [3000, 5000, 6500, 8000, 10000]
-    for temp in test_temps:
-        frame_data.meta.color_temperature = temp
-        print(f"色温 {temp}K 时的参数:")
-        
-        # 使用模块内的插值方法获取参数
-        awb_module = pipeline.get_module("AWBRAW")
-        if awb_module:
-            wb_params = awb_module.interpolate_wb_gain(frame_data.meta.wb_gain, temp)
-            if wb_params:
-                print(f"  白平衡: R={wb_params['r']:.3f}, G={wb_params['g']:.3f}, B={wb_params['b']:.3f}")
-        
-        ccm_module = pipeline.get_module("CCM")
-        if ccm_module:
-            ccm_matrix = ccm_module.interpolate_ccm_matrix(frame_data.meta.ccm_matrix, temp)
-            if ccm_matrix is not None:
-                print(f"  CCM矩阵: {ccm_matrix[0,0]:.3f}")
     
-    # 使用5000K色温处理图像
   
