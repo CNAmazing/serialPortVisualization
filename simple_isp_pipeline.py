@@ -26,6 +26,7 @@ class FrameMeta:
     wb_gain:Dict[int,Dict[str,float]]=None
     ccm_matrix: Dict[int, np.ndarray] = None 
     gamma: float = 2.2
+    saturation: float = 1.0
 
 @dataclass
 class FrameData:
@@ -475,6 +476,34 @@ class GammaModule(ISPModule):
         np.clip(frame_data.image, 0, 1, out=frame_data.image)
         
         return frame_data  # 原地修改，返回原对象
+
+class SaturationModule(ISPModule):
+    """饱和度调整模块"""
+    
+    def __init__(self):
+        super().__init__("Saturation")
+    
+    def process(self, frame_data: FrameData, **kwargs) -> FrameData:
+        meta = frame_data.meta
+        
+        # 从 FrameMeta 直接获取饱和度参数
+        saturation = meta.saturation
+        
+        # 如果饱和度为1.0，不需要调整
+        if saturation == 1.0:
+            return frame_data
+        
+        # 计算灰度值 (使用标准RGB到灰度的转换)
+        gray = 0.299 * frame_data.image[..., 2] + 0.587 * frame_data.image[..., 1] + 0.114 * frame_data.image[..., 0]
+        
+        # 饱和度调整公式: new_color = gray + saturation * (color - gray)
+        for i in range(3):
+            frame_data.image[..., i] = gray + saturation * (frame_data.image[..., i] - gray)
+        
+        # 确保值在有效范围内
+        np.clip(frame_data.image, 0, 1, out=frame_data.image)
+        
+        return frame_data  # 原地修改，返回原对象
 class PPModule(ISPModule):
     """postProcess校正模块"""
     def __init__(self):
@@ -705,6 +734,7 @@ def create_raw_pipeline() -> SimpleISPPipeline:
     pipeline.add_module(DemosaicModule())
     pipeline.add_module(CCMModule())
     pipeline.add_module(GammaModule())
+    pipeline.add_module(SaturationModule())  # 添加饱和度模块
     pipeline.add_module(PPModule())
     pipeline.add_module(MetricModule())  # 添加质量评估模块
     return pipeline
@@ -795,6 +825,7 @@ if __name__ == "__main__":
         wb_gain=wb_gain_config,
         ccm_matrix=ccm_config,
         gamma=2.2,
+        saturation=1.8,  # 饱和度调整，1.0为原始饱和度，>1.0增加饱和度，<1.0降低饱和度
         blc_value=64
     )
 
