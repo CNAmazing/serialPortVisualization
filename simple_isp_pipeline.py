@@ -328,7 +328,6 @@ class AWBRawModule(ISPModule):
     
     def process(self, frame_data: FrameData, **kwargs) -> FrameData:
         meta = frame_data.meta
-        image = frame_data.image
         
         # 使用类内插值方法获取白平衡参数
         wb_params = self.interpolate_wb_gain(meta.wb_gain, meta.color_temperature)
@@ -362,7 +361,6 @@ class AWBRawModule(ISPModule):
                 frame_data.image[::2, 1::2] *= g_gain
             case _:
                 raise ValueError(f"Unsupported bayer pattern: {meta.bayer_pattern}")
-    
         np.clip(frame_data.image, 0, 2**meta.raw_bit-1, out=frame_data.image)
         return frame_data  # 原地修改，返回原对象
 class DemosaicModule(ISPModule):
@@ -441,7 +439,6 @@ class CCMModule(ISPModule):
 
     def process(self, frame_data: FrameData, **kwargs) -> FrameData:
         meta = frame_data.meta
-        image = frame_data.image
         
         # 使用类内插值方法获取 CCM 矩阵
         ccm_matrix = self.interpolate_ccm_matrix(meta.ccm_matrix, meta.color_temperature)
@@ -458,7 +455,7 @@ class CCMModule(ISPModule):
         frame_data.image = result.reshape(h, w, 3)  # 原地修改
         np.clip(frame_data.image, 0, 1, out=frame_data.image)
         
-        return frame_data  # 原地修改，返回原对象
+        return frame_data  
     
 class GammaModule(ISPModule):
     """Gamma校正模块"""
@@ -492,6 +489,151 @@ class PPModule(ISPModule):
         
         return frame_data  # 原地修改，返回原对象
 
+class MetricModule(ISPModule):
+    """图像质量评估模块"""
+    
+    def __init__(self):
+        super().__init__("METRIC")
+    
+    def calculate_snr(self, image):
+        """
+        计算图像的信噪比(SNR)
+        
+        Args:
+            image: 输入图像 (H, W, C)
+        
+        Returns:
+            snr: 信噪比 (dB)
+        """
+        # 转换为灰度图像
+        if len(image.shape) == 3:
+            gray = 0.299*image[...,2]+ 0.587*image[...,1]+ 0.114*image[...,0]
+        else:
+            gray = image
+        
+        # 计算信号功率（图像均值）
+        signal_power = np.mean(gray) ** 2
+        
+        # 计算噪声功率（图像方差）
+        noise_power = np.var(gray)
+        
+        # 避免除零
+        if noise_power == 0:
+            return float('inf')
+        
+        # 计算SNR (dB)
+        snr = 10 * np.log10(signal_power / noise_power)
+        return snr
+    
+    def calculate_sharpness(self, image):
+        """
+        计算图像锐度（使用拉普拉斯算子）
+        
+        Args:
+            image: 输入图像 (H, W, C)
+        
+        Returns:
+            sharpness: 锐度值
+        """
+        # 转换为灰度图像
+        if len(image.shape) == 3:
+            gray = 0.299*image[...,2]+ 0.587*image[...,1]+ 0.114*image[...,0]
+        else:
+            gray = image
+        
+        # 拉普拉斯算子
+        laplacian_kernel = np.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])
+        
+        # 应用拉普拉斯算子
+        sharpness = cv2.Laplacian(gray, cv2.CV_64F)
+        
+        # 计算锐度值（拉普拉斯算子的方差）
+        sharpness_value = np.var(sharpness)
+        return sharpness_value
+    
+    def calculate_contrast(self, image):
+        """
+        计算图像对比度
+        
+        Args:
+            image: 输入图像 (H, W, C)
+        
+        Returns:
+            contrast: 对比度值
+        """
+        # 转换为灰度图像
+        if len(image.shape) == 3:
+            gray = 0.299*image[...,2]+ 0.587*image[...,1]+ 0.114*image[...,0]
+        else:
+            gray = image
+        
+        # 计算对比度（标准差）
+        contrast = np.std(gray)
+        return contrast
+    
+    def calculate_brightness(self, image):
+        """
+        计算图像亮度
+        
+        Args:
+            image: 输入图像 (H, W, C)
+        
+        Returns:
+            brightness: 亮度值
+        """
+        # 转换为灰度图像
+        if len(image.shape) == 3:
+            gray = 0.299*image[...,2]+ 0.587*image[...,1]+ 0.114*image[...,0]
+        else:
+            gray = image
+        
+        # 计算平均亮度
+        brightness = np.mean(gray)
+        return brightness
+    
+    def process(self, frame_data: FrameData, **kwargs) -> FrameData:
+        """
+        计算图像质量指标
+        
+        Args:
+            frame_data: 输入帧数据
+        
+        Returns:
+            frame_data: 输出帧数据（添加质量指标）
+        """
+        image = frame_data.image
+        
+        # 确保图像在0-1范围内
+        if image.max() > 1.0:
+            image = image / 255.0
+        
+        # 计算各项指标
+        snr = self.calculate_snr(image)
+        sharpness = self.calculate_sharpness(image)
+        contrast = self.calculate_contrast(image)
+        brightness = self.calculate_brightness(image)
+        
+        # 输出指标
+        print(f"\n=== 图像质量指标 ===")
+        print(f"信噪比 (SNR): {snr:.2f} dB")
+        print(f"锐度: {sharpness:.4f}")
+        print(f"对比度: {contrast:.4f}")
+        print(f"亮度: {brightness*255:.0f}")
+        print("=" * 30)
+        
+        # 将指标添加到frame_data的meta中（可选）
+        if not hasattr(frame_data.meta, 'metrics'):
+            frame_data.meta.metrics = {}
+        
+        frame_data.meta.metrics = {
+            'snr': snr,
+            'sharpness': sharpness,
+            'contrast': contrast,
+            'brightness': brightness
+        }
+        
+        return frame_data
+
 class SimpleISPPipeline:
     """简化的ISP流水线"""
     
@@ -524,7 +666,7 @@ class SimpleISPPipeline:
             self.processing_times[module.name] = processing_time
             
             print(f"{module.name:15s} : {processing_time:.4f}s")
-        print(f"totalTime: {sum(self.processing_times.values()):.4f}s")
+        print(f"{'Total':15s} : {sum(self.processing_times.values()):.4f}s")
         print("=" * 40)
         
         return frame_data
@@ -564,6 +706,7 @@ def create_raw_pipeline() -> SimpleISPPipeline:
     pipeline.add_module(CCMModule())
     pipeline.add_module(GammaModule())
     pipeline.add_module(PPModule())
+    pipeline.add_module(MetricModule())  # 添加质量评估模块
     return pipeline
     
 # 使用示例
@@ -572,53 +715,82 @@ if __name__ == "__main__":
     print("=" * 50)
     
     # 创建流水线
-    pipeline = create_raw_pipeline()
-    pipeline.print_pipeline_info()
-    
+   
     
     # 创建色温相关的参数配置（按升序排列）
     # LSC 增益图配置（按色温升序）
     lsc_gain_config = {
         3000: {  # 暖光
-            "r": np.ones((3, 3)) * 1.1,
-            "gr": np.ones((3, 3)) * 1.0,
-            "gb": np.ones((3, 3)) * 1.0,
-            "b": np.ones((3, 3)) * 0.9
+            "r": np.ones((20, 20)) * 1.0,
+            "gr": np.ones((20, 20)) * 1.0,
+            "gb": np.ones((20, 20)) * 1.0,
+            "b": np.ones((20, 20)) * 1.0
         },
         6500: {  # 日光
-            "r": np.ones((3, 3)) * 1.0,
-            "gr": np.ones((3, 3)) * 1.0,
-            "gb": np.ones((3, 3)) * 1.0,
-            "b": np.ones((3, 3)) * 1.0
+            "r": np.ones((20, 20)) * 1.0,
+            "gr": np.ones((20, 20)) * 1.0,
+            "gb": np.ones((20, 20)) * 1.0,
+            "b": np.ones((20, 20)) * 1.0
         },
         10000: {  # 冷光
-            "r": np.ones((3, 3)) * 0.9,
-            "gr": np.ones((3, 3)) * 1.0,
-            "gb": np.ones((3, 3)) * 1.0,
-            "b": np.ones((3, 3)) * 1.1
+            "r": np.ones((20, 20)) * 1.0,
+            "gr": np.ones((20, 20)) * 1.0,
+            "gb": np.ones((20, 20)) * 1.0,
+            "b": np.ones((20, 20)) * 1.0
         }
     }
     
-    # 白平衡增益配置（按色温升序）
+    # 白平衡增益配置（按色温升序）- 基于硬件配置
+    # 硬件配置: referenceColorTemp = { 2800, 3000, 4000, 5000, 6000 }
+    # 硬件配置: ispGainR = { 189736405, 206695329, 167125996, 139812370, 129124649 }
+    # 硬件配置: ispGainG = { 100000000, 100000000, 100000000, 100000000, 100000000 }
+    # 硬件配置: ispGainB = { 93594074, 97586706, 125773110, 132634347, 145515668 }
     wb_gain_config = {
-        3000: {"r": 1.3, "g": 1.0, "b": 0.7},
-        6500: {"r": 1.0, "g": 1.0, "b": 1.0},
-        10000: {"r": 0.7, "g": 1.0, "b": 1.3}
+        2800: {"r": 189736405/100000000, "g": 100000000/100000000, "b": 93594074/100000000},
+        3000: {"r": 206695329/100000000, "g": 100000000/100000000, "b": 97586706/100000000},
+        4000: {"r": 167125996/100000000, "g": 100000000/100000000, "b": 125773110/100000000},
+        5000: {"r": 139812370/100000000, "g": 100000000/100000000, "b": 132634347/100000000},
+        6000: {"r": 129124649/100000000, "g": 100000000/100000000, "b": 145515668/100000000}
     }
     
-    # CCM 矩阵配置（按色温升序）
+    # CCM 矩阵配置（按色温升序）- 基于硬件配置
+    # 硬件配置中的coeff数组，需要除以100000000进行归一化
     ccm_config = {
-        3000: np.array([[1.2, -0.1, -0.1], [-0.1, 1.1, 0.0], [-0.1, 0.0, 1.1]], dtype=np.float32),
-        6500: np.eye(3, dtype=np.float32),
-        10000: np.array([[1.1, 0.0, -0.1], [0.0, 1.0, 0.0], [-0.1, 0.0, 1.2]], dtype=np.float32)
+        2800: np.array([
+            [158486495/100000000, 5098645/100000000, -63585141/100000000],
+            [-72519964/100000000, 228424003/100000000, -55904038/100000000],
+            [-34330875/100000000, -180267131/100000000, 314598007/100000000]
+        ], dtype=np.float32),
+        3000: np.array([
+            [168348840/100000000, -34550326/100000000, -33798514/100000000],
+            [-71885269/100000000, 212023354/100000000, -40138085/100000000],
+            [-19310425/100000000, -172367764/100000000, 291678189/100000000]
+        ], dtype=np.float32),
+        4000: np.array([
+            [218345353/100000000, -90674492/100000000, -27670861/100000000],
+            [-68515247/100000000, 196133526/100000000, -27618279/100000000],
+            [-19552679/100000000, -95922292/100000000, 215474972/100000000]
+        ], dtype=np.float32),
+        5000: np.array([
+            [188021296/100000000, -49049222/100000000, -38972074/100000000],
+            [-48422807/100000000, 202604457/100000000, -54181650/100000000],
+            [-16547936/100000000, -96709593/100000000, 213257530/100000000]
+        ], dtype=np.float32),
+        6000: np.array([
+            [192410599/100000000, -60013675/100000000, -32396923/100000000],
+            [-42183644/100000000, 196039632/100000000, -53855987/100000000],
+            [-13275632/100000000, -87542089/100000000, 200817722/100000000]
+        ], dtype=np.float32)
     }
-    
+    pipeline = create_raw_pipeline()
+    pipeline.print_pipeline_info()
+
     meta = FrameMeta(
         width=2592,
         height=1944,
         raw_bit=10,
         bayer_pattern="RGGB",
-        color_temperature=5000,  # 目标色温，会进行插值
+        color_temperature=4000,  # 目标色温，会进行插值（硬件支持: 2800, 3000, 4000, 5000, 6000）
         lsc_gain=lsc_gain_config,
         wb_gain=wb_gain_config,
         ccm_matrix=ccm_config,
@@ -630,14 +802,11 @@ if __name__ == "__main__":
     frame_data = FrameData(image=None, meta=meta)
 
     # 创建测试图像和元数据
-    image_path=r'C:\WorkSpace\serialPortVisualization\data\g07s5ColorChecker\A.raw'
+    image_path=r'C:\WorkSpace\serialPortVisualization\data\g07s5ColorChecker\CWF.raw'
     image= readModule.process(frame_data,image_path=image_path)
-    print(image.shape)
-    print(image.min(),image.max())
     
     frame_data = FrameData(image=image, meta=meta)
     
-    print(f"\n测试图像: {frame_data.image.shape}")
     
     # 处理图像
     result = pipeline.process(frame_data)

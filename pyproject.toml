@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "colormath>=3.0.0",
+    "colour-science>=0.4.6",
     "deap>=1.4.3",
     "matplotlib>=3.10.7",
     "numpy>=2.3.4",
