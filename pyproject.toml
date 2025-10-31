@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "bm3d>=4.0.3",
     "colormath>=3.0.0",
     "colour-science>=0.4.6",
     "deap>=1.4.3",

@@ -4,7 +4,7 @@ from scipy.optimize import minimize, curve_fit,least_squares
 import cv2
 import numpy as np
 from tools import *
-from skimage.color import rgb2lab,deltaE_ciede2000
+from skimage.color import rgb2lab,deltaE_ciede2000,deltaE_cie76
 from deap import base, creator, tools, algorithms
 from functools import partial
 import time
@@ -20,7 +20,12 @@ def rgbError_detalE2000(rgb1, rgb2):
     lab1=rgb2lab(rgb1)
     lab2=rgb2lab(rgb2)
     delta_e = deltaE_ciede2000(lab1, lab2)
-    return np.mean(delta_e)
+    return delta_e
+def rgbError_detalEcie76(rgb1, rgb2):
+    lab1=rgb2lab(rgb1)
+    lab2=rgb2lab(rgb2)
+    delta_e = deltaE_cie76(lab1, lab2)
+    return delta_e
 def median_filter_NR(arr, size=5):
     """
     使用scipy实现中值滤波
@@ -367,7 +372,105 @@ class CCM_3x3_6variables:
         # print("===ccm===\n",npToString(optimized_ccm))
 
         return optimized_ccm_full
-    
+class CCM_3x3_saturation:
+    def __init__(self,input,output):
+        self.input = input
+        self.output = output
+        # self.ccm = np.ones(3, 3)  # 初始化为单位矩阵
+        self.ccm = np.eye(3)  # 初始化为单位矩阵
+        self.saturation = 1.0
+        # 仅用shape进行判断
+        if input.shape != output.shape:
+            raise ValueError("input和output的形状必须相同")
+        if input.shape[1] != 3:
+            raise ValueError("最后一个维度必须是RGB颜色")
+        self.m, self.n = input.shape[:2]  # 获取输入图像的形状
+
+        Cons1 = np.zeros((3, 9))
+        for i in range(3):
+            Cons1[i, 3*i : 3*i+3] = 1  # 每行对应矩阵M的一行的3个元素
+        
+        # Cin=np.zeros((1, 9))
+        # Cin[0, 4]=-1
+        # Cin[0, 8]=1
+
+        self.constraints = []
+        # 约束条件: CCM矩阵的每一行之和为1
+        self.constraints.append( {
+            'type': 'eq', 
+            'fun': lambda x: Cons1 @ x[:-1] - np.ones(3),
+        } )
+    def loss(self, x, input, output):
+        input=input.T
+        output=output.T
+        ccm_x=x[:-1]
+        saturation=x[-1]
+        gray_matrix=np.array([[0.2126,0.7152,0.0722],[0.2126,0.7152,0.0722],[0.2126,0.7152,0.0722]])
+        saturation_matrix=np.eye(3)*saturation+(1-saturation)*gray_matrix
+        
+        # print(input.shape,output.shape)
+        ccm = ccm_x.reshape(3, 3)  # 将扁平化的参数恢复为3x3矩阵
+        # predicted=np.dot(ccm,input)  # 应用颜色校正
+        predicted=np.dot(ccm,input)  # 应用颜色校正
+        predicted=np.dot(saturation_matrix,predicted)
+        #predicted.shape=(3,24)
+        #output.shape=(3,24)
+
+        error=rgbError_detalE2000(predicted.T,output.T)
+        return error
+        sumTmp=np.sum((predicted - output)**2,axis=0)
+        # print('sumTmp',sumTmp)
+        # sumTmp[1]*=3
+        # sumTmp[23]*=3
+        error = np.mean(sumTmp)  # MSE误差
+        # print(f"error:{error}")
+        # return((labPredicted - labOutput)**2).flatten()
+        return error
+
+    def infer_image(self):
+        x = self.ccm.flatten()  # 初始猜测值
+        x = np.concatenate((x, [self.saturation]))
+
+       
+            # constraints.append( {
+        #     'type': 'ineq', 
+        #     'fun': lambda x: Cin @ x,
+        # } )
+        '''=====================最小二乘============================='''
+        # from scipy.optimize import least_squares
+
+        # 假设你的 self.loss 函数返回残差（residuals）而不是标量损失值
+        # result = least_squares(
+        #     self.loss,  # 这个函数现在应该返回残差向量而不是标量
+        #     x,
+        #     args=(self.input, self.output),
+        #     # bounds=bounds,  # least_squares 支持 bounds
+        #     method='trf',  # 或 'lm'（Levenberg-Marquardt，无约束时使用）
+        #     max_nfev=100000,
+        #     verbose=2
+        # )
+        '''=====================能量项优化============================='''
+        # bounds = [(-4, 4) for _ in range(9)]
+        result = minimize(
+            self.loss,  # 包装loss函数
+            x,  
+            args=(self.input, self.output),
+            constraints=self.constraints,
+
+            # bounds=bounds,
+            method='SLSQP',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
+            options={'maxiter': 100000,'rhobeg': 1.0, 'rhoend': 1e-12,'disp': False}
+        )
+        # 打印优化结果的详细信息
+  
+
+        # 将优化结果恢复为CCM矩阵
+        optimized_ccm = result.x[:-1].reshape(3, 3)
+        optimized_saturation = result.x[-1]
+        # print("===ccm===\n",npToString(optimized_ccm))
+
+        return optimized_ccm
+        
 class CCM_3x3:
     def __init__(self,input,output):
         self.input = input
@@ -405,8 +508,9 @@ class CCM_3x3:
         predicted=np.dot(ccm,input)  # 应用颜色校正
         #predicted.shape=(3,24)
         #output.shape=(3,24)
-
+        predicted=Gamma(predicted)
         error=rgbError_detalE2000(predicted.T,output.T)
+        error=np.mean(error)
         return error
         sumTmp=np.sum((predicted - output)**2,axis=0)
         # print('sumTmp',sumTmp)
@@ -659,6 +763,32 @@ ColorCheckerRGB= np.array([
     [84.003,85.364,87.504],
     [48.704,48.612,48.055],
 ])/255.0
+CC_D50_2=np.array([
+    [119,  81,  68],   # Dark skin
+    [203, 147, 130],   # Light skin
+    [ 85, 123, 157],   # Blue sky
+    [ 99, 110,  65],   # Foliage
+    [127, 130, 177],   # Blue flower
+    [100, 193, 178],   # Bluish green
+    [229, 124,  50],   # Orange
+    [ 52,  94, 169],   # Purplish blue
+    [204,  82,  97],   # Moderate red
+    [ 94,  60, 105],   # Purple
+    [168, 188,  64],   # Yellow green
+    [237, 163,  47],   # Orange yellow
+    [  0,  65, 147],   # Blue
+    [ 74, 148,  73],   # Green
+    [182,  56,  57],   # Red
+    [241, 197,  18],   # Yellow
+    [191,  81, 145],   # Magenta
+    [  0, 136, 169],   # Cyan
+    [240, 240, 236],   # White
+    [202, 204, 203],   # Neutral 8
+    [163, 164, 163],   # Neutral 6.5
+    [124, 123, 122],   # Neutral 5
+    [ 84,  85,  85],   # Neutral 3.5
+    [ 48,  49,  51],   # Black
+])/255.0
 IDEAL_COLORCHECKER_RGB = np.array([
     [0.45098, 0.32157, 0.26667],    # 深肤色
     [0.76078, 0.58824, 0.50980],    # 浅肤色
@@ -676,7 +806,7 @@ IDEAL_COLORCHECKER_RGB = np.array([
     [0.27451, 0.58039, 0.28627],    # 绿色
     [0.68627, 0.21176, 0.23529],    # 红色
     [0.90588, 0.78039, 0.12157],    # 黄色
-    [0.73333, 0.33725, 0.58431],    # magenta
+    [0.73333, 0.33725, 0.58431],    # 洋红色
     [0.03137, 0.52157, 0.63137],    # 青色
     [0.95294, 0.95294, 0.95294],    # 白色
     [0.78431, 0.78431, 0.78431],    # 中性8
@@ -711,8 +841,14 @@ IDEAL_RGB = np.array([
       [0.324	,0.33	,0.336],
       [0.191	,0.194	,0.199],
     ])  
+A_ColorChecker_Vivo=np.array([
+  [0.630, 0.370, 0.283], [0.922, 0.659, 0.575], [0.539, 0.561, 0.628], [0.513, 0.511, 0.315], [0.700, 0.587, 0.678], [0.542, 0.785, 0.738],
+  [0.938, 0.561, 0.297], [0.392, 0.386, 0.612], [0.898, 0.384, 0.387], [0.517, 0.256, 0.361], [0.707, 0.748, 0.371], [0.960, 0.672, 0.352],
+  [0.213, 0.240, 0.511], [0.346, 0.592, 0.363], [0.815, 0.261, 0.236], [0.941, 0.766, 0.364], [0.842, 0.351, 0.496], [0.114, 0.546, 0.643],
+  [0.925, 0.849, 0.814], [0.847, 0.766, 0.729], [0.724, 0.645, 0.610], [0.596, 0.515, 0.476], [0.412, 0.332, 0.303], [0.234, 0.168, 0.151]
+])
 # IDEAL_LINEAR_RGB = reverseGamma(IDEAL_RGB) # 逆Gamma处理后的理想RGB值
-IDEAL_LINEAR_RGB = reverseGamma(IDEAL_RGB) # 逆Gamma处理后的理想RGB值
+IDEAL_LINEAR_RGB = reverseGamma(CC_D50_2) # 逆Gamma处理后的理想RGB值
 def ccmApply_3x4(img,ccm):
     # 3. 应用CCM矫正（使用左乘）
     h, w = img.shape[:2] #H*W*3
@@ -723,38 +859,120 @@ def ccmApply_3x4(img,ccm):
     return corrected_image
 def calColor(img,area):
     """计算色块的平均RGB值"""
-    avg_colors = []
-    for (x1, y1, x2, y2) in area:
-        patch = img[y1:y2, x1:x2]
-        # mean_color = cv2.mean(patch)[:3]  # 计算BGR的均值，忽略Alpha通道
-        Rmean= np.mean(patch[:,:,0])
-        Gmean= np.mean(patch[:,:,1])
-        Bmean= np.mean(patch[:,:,2])
-        mean_color = [Rmean, Gmean, Bmean]
-        avg_colors.append(mean_color)
-    return np.array(avg_colors)  # 返回一个包含所有色块平均颜色的数组
+    # 批量处理：一次性计算每个区域所有通道的均值
+    avg_colors = np.array([
+        np.mean(img[y1:y2, x1:x2], axis=(0, 1))  # axis=(0,1) 表示在高度和宽度维度上求均值
+        for x1, y1, x2, y2 in area
+    ])
+    return avg_colors  
+def softmax_max(x, beta=10.0):
+    return (1.0 / beta) * np.log(np.sum(np.exp(beta * x)))
 def calColorError(img,area):
     """计算色块的平均RGB值"""
-    avg_colors = []
-    for (x1, y1, x2, y2) in area:
-        patch = img[y1:y2, x1:x2]
-        # mean_color = cv2.mean(patch)[:3]  # 计算BGR的均值，忽略Alpha通道
-        Rmean= np.mean(patch[:,:,0])
-        Gmean= np.mean(patch[:,:,1])
-        Bmean= np.mean(patch[:,:,2])
-        mean_color = [Rmean, Gmean, Bmean]
-        avg_colors.append(mean_color)
-    avg_colors= np.array(avg_colors)  # 返回一个包含所有色块平均颜色的数组
+    # 批量处理：一次性计算每个区域所有通道的均值
+    avg_colors = np.array([
+        np.mean(img[y1:y2, x1:x2], axis=(0, 1))  # axis=(0,1) 表示在高度和宽度维度上求均值
+        for x1, y1, x2, y2 in area
+    ])
+    error=rgbError_detalE2000(avg_colors,CC_D50_2)
     
-    labPredicted= rgb_to_lab(avg_colors)  # 转换为Lab颜色空间
-    labOutput = rgb_to_lab(IDEAL_RGB)  # 转换为Lab颜色空间
-
-    sumTmp=np.sqrt(np.sum((labPredicted - labOutput)**2,axis=1))
-    error = np.mean(sumTmp)  # MSE误差
-    # error=np.sqrt(np.sum((avg_colors - IDEAL_LINEAR_RGB)**2,axis=1))
+    error=error
+    error=np.mean(error)
     return error
+def calColorError_ColorChecker(img,area,):
+    """计算色块的平均RGB值"""
+    # 批量处理：一次性计算每个区域所有通道的均值
+    avg_colors = np.array([
+        np.mean(img[y1:y2, x1:x2], axis=(0, 1))  # axis=(0,1) 表示在高度和宽度维度上求均值
+        for x1, y1, x2, y2 in area
+    ])
+    
+    min_vals = np.min(avg_colors, axis=1)  
+    max_vals = np.max(avg_colors, axis=1)  
+    
+    # 避免除以0：如果max为0，结果为0；否则计算 1 - min/max
+    saturation = np.where(max_vals == 0, 0, 1 - min_vals / max_vals)
+    
+    errors=rgbError_detalE2000(avg_colors,CC_D50_2)
+    return errors,saturation  
+def save_yaml_config(image,area,awb,ccm,save_path,basename):
+    errors,saturation=calColorError_ColorChecker(image,area)
+    avgError=np.mean(errors)
+    minError=np.min(errors)
+    maxError=np.max(errors)
+    
+    # 按十位数区间统计errors的个数
+    # 定义区间：[0, 10), [10, 20), [20, 30), [30, 40), ...
+    max_bin = int(np.ceil(maxError / 10) * 10) + 10  # 向上取整到十位数，再加10
+    bins = np.arange(0, max_bin + 1, 10)  # 生成0, 10, 20, 30...的区间边界
+    hist_counts, bin_edges = np.histogram(errors, bins=bins)
+    
+    # 创建区间标签和统计字典
+    error_stats = {}
+    for i in range(len(hist_counts)):
+        start = int(bin_edges[i])
+        end = int(bin_edges[i+1]) if i+1 < len(bin_edges) else int(max_bin)
+        # 区间显示格式：0-10 表示 [0, 10)，即包含0但不包含10
+        label = f"{start}-{end}"
+        count = int(hist_counts[i])
+        if count > 0:  # 只记录有数据的区间
+            error_stats[label] = count
+    
+    errors = errors.reshape(4,6)  
+    saturation=saturation.reshape(4,6)
+    bestParamx1e8=np.array(awb)*100000000
+    bestCCMx1e8= ccm*100000000
+    bestParamx1e8=bestParamx1e8.astype(np.int64)
+    bestCCMx1e8=bestCCMx1e8.astype(np.int64)
+    awbNormalized=awb/awb[1]
+    ccmNormalized= ccm*awb[1]
+    awbx1e8=awbNormalized*100000000
+    ccmx1e8= ccmNormalized*100000000
+    awbx1e8=awbx1e8.astype(np.int64)
+    ccmx1e8=ccmx1e8.astype(np.int64)
+    yamlConfig={
+        'awb': {
+            'R': float(f"{awb[3]:.4f}"),
+            'Gr': float(f"{awb[1]:.4f}"),
+            'Gb': float(f"{awb[2]:.4f}"),
+            'B': float(f"{awb[0]:.4f}"),
+        },
+        'ccm': np.round(ccm, 4).tolist(),
+        'awb_x': {
+            'R': int(f"{bestParamx1e8[3]}"),
+            'Gr':int(f"{bestParamx1e8[1]}"),
+            'Gb':int(f"{bestParamx1e8[2]}"),
+            'B': int(f"{bestParamx1e8[0]}"),
+        },
+        'ccm_x': bestCCMx1e8.tolist(),
+        'awbNormalized': {
+            'R': float(f"{awbNormalized[3]:.4f}"),
+            'Gr': float(f"{awbNormalized[1]:.4f}"),
+            'Gb': float(f"{awbNormalized[2]:.4f}"),
+            'B': float(f"{awbNormalized[0]:.4f}"),
+        },
+        'ccmNormalized': np.round(ccmNormalized, 4).tolist(),
+        'awb_x1e8': {
+            'R': int(f"{awbx1e8[3]}"),
+            'Gr':int(f"{awbx1e8[1]}"),
+            'Gb':int(f"{awbx1e8[2]}"),
+            'B': int(f"{awbx1e8[0]}"),
+        },
+        'ccm_x1e8': ccmx1e8.tolist(),
+        'errors': np.round(errors, 2).tolist(),
+        'avgError': float(f"{avgError:.4f}"),
+        'minError': float(f"{minError:.4f}"),
+        'maxError': float(f"{maxError:.4f}"),
+        'errorStats': error_stats,  # 按十位数区间统计的个数
+        'saturation':np.round(saturation, 2).tolist(),
+    }
+    yamlSavePath=os.path.join(save_path, f"{basename}_avgError{avgError:.2f}")
+    saveYaml(yamlConfig,yamlSavePath)
+
+
+
 def autoFitAwb(image_folder,lscyamlFolder):
-    fixGreen= False
+    fixGreen= True
     @timeit
     def loss (x,  imgLSC,area,fixGreen):
         if fixGreen:
@@ -777,19 +995,20 @@ def autoFitAwb(image_folder,lscyamlFolder):
         # print(f"计算的色块平均RGB值: {color_means}...")
         # ccmCalib= CCM_3x4(color_means, IDEAL_LINEAR_RGB) 
         # ccm, best_error, logbook = run_ga(color_means, IDEAL_LINEAR_RGB)
-
-        ccmCalib= CCM_3x3(color_means, IDEAL_LINEAR_RGB) 
+        ccmCalib= CCM_3x3(color_means, CC_D50_2) 
         ccm= ccmCalib.infer_image()
         # imgTmp= ccmApply_3x4(imgTmp,ccm)
         imgTmp= ccmApply(imgTmp,ccm)
-        imgTmp= Gamma(imgTmp)
+        np.clip(imgTmp, 0, 1, out=imgTmp)
+        imgTmp= Gamma(imgTmp)       
         error=calColorError(imgTmp,area)
         print(f"rGain:{rGain:.2f}, gGain:{gGain:.2f}, bGain:{bGain:.2f}, error:{error:.2f}" ,end='')
         return  error
     
     full_paths, basenames = get_paths(image_folder,suffix=".raw")
+    area=[[312, 285, 382, 355], [497, 285, 567, 355], [682, 285, 752, 355], [867, 285, 937, 355], [1052, 285, 1122, 355], [1237, 285, 1307, 355], [312, 470, 382, 540], [497, 470, 567, 540], [682, 470, 752, 540], [867, 470, 937, 540], [1052, 470, 1122, 540], [1237, 470, 1307, 540], [312, 655, 382, 725], [497, 655, 567, 725], [682, 655, 752, 725], [867, 655, 937, 725], [1052, 655, 1122, 725], [1237, 655, 1307, 725], [312, 840, 382, 910], [497, 840, 567, 910], [682, 840, 752, 910], [867, 840, 937, 910], [1052, 840, 1122, 910], [1237, 840, 1307, 910]]
     #no d50 d75
-    area=[[709, 692, 929, 912], [1194, 692, 1414, 912], [1679, 692, 1899, 912], [2164, 692, 2384, 912], [2649, 692, 2869, 912], [3134, 692, 3354, 912], [709, 1177, 929, 1397], [1194, 1177, 1414, 1397], [1679, 1177, 1899, 1397], [2164, 1177, 2384, 1397], [2649, 1177, 2869, 1397], [3134, 1177, 3354, 1397], [709, 1662, 929, 1882], [1194, 1662, 1414, 1882], [1679, 1662, 1899, 1882], [2164, 1662, 2384, 1882], [2649, 1662, 2869, 1882], [3134, 1662, 3354, 1882], [709, 2147, 929, 2367], [1194, 2147, 1414, 2367], [1679, 2147, 1899, 2367], [2164, 2147, 2384, 2367], [2649, 2147, 2869, 2367], [3134, 2147, 3354, 2367]]
+    # area=[[709, 692, 929, 912], [1194, 692, 1414, 912], [1679, 692, 1899, 912], [2164, 692, 2384, 912], [2649, 692, 2869, 912], [3134, 692, 3354, 912], [709, 1177, 929, 1397], [1194, 1177, 1414, 1397], [1679, 1177, 1899, 1397], [2164, 1177, 2384, 1397], [2649, 1177, 2869, 1397], [3134, 1177, 3354, 1397], [709, 1662, 929, 1882], [1194, 1662, 1414, 1882], [1679, 1662, 1899, 1882], [2164, 1662, 2384, 1882], [2649, 1662, 2869, 1882], [3134, 1662, 3354, 1882], [709, 2147, 929, 2367], [1194, 2147, 1414, 2367], [1679, 2147, 1899, 2367], [2164, 2147, 2384, 2367], [2649, 2147, 2869, 2367], [3134, 2147, 3354, 2367]]
     #d50 
     # area=[[628, 537, 888, 797], [1133, 537, 1393, 797], [1638, 537, 1898, 797], [2143, 537, 2403, 797], [2648, 537, 2908, 797], [3153, 537, 3413, 797], [628, 1042, 888, 1302], [1133, 1042, 1393, 1302], [1638, 1042, 1898, 1302], [2143, 1042, 2403, 1302], [2648, 1042, 2908, 1302], [3153, 1042, 3413, 1302], [628, 1547, 888, 1807], [1133, 1547, 1393, 1807], [1638, 1547, 1898, 1807], [2143, 1547, 2403, 1807], [2648, 1547, 2908, 1807], [3153, 1547, 3413, 1807], [628, 2052, 888, 2312], [1133, 2052, 1393, 2312], [1638, 2052, 1898, 2312], [2143, 2052, 2403, 2312], [2648, 2052, 2908, 2312], [3153, 2052, 3413, 2312]]
     #d75
@@ -822,12 +1041,13 @@ def autoFitAwb(image_folder,lscyamlFolder):
         gainList.append(mesh_Gb)
         gainList.append(mesh_B)
    
-        img = readRaw(path,h=3072,w=4096)  # 读取为numpy数组
+        img = readRaw(path,h=1200,w=1600)  # 读取为numpy数组
         print(f"图像尺寸: {img.shape},数据类型: {img.dtype},最小值: {img.min()}, 最大值: {img.max()},均值_10bit:{img.mean()},均值_8bit:{img.mean()/1023*255}")  # (高度, 宽度)
         img= BLC(img,blcParam=64)
         # img=bm3d_denoise(img)
         lsc_strength=1
-        imgLSC=LSC(img,gainList,strength=[lsc_strength,lsc_strength,lsc_strength,lsc_strength])
+        # imgLSC=LSC(img,gainList,strength=[lsc_strength,lsc_strength,lsc_strength,lsc_strength])
+        imgLSC=img
         minError=float('inf')
         bestParam=None
         bestCCM=None
@@ -835,17 +1055,18 @@ def autoFitAwb(image_folder,lscyamlFolder):
         savePath=os.path.join(image_folder,saveFolderName)
         if fixGreen:
             x=[1,1] #rGain, bGain
-            bounds=[(0.3, 3.5), (0.3, 3.5)]
+            bounds=[(0.3, 5), (0.3, 5)]
         else:    
             x=[1,1,1] #rGain, gGain, bGain
-            bounds=[(0.3, 3.5), (0.3,3.5), (0.3, 3.5)]
+            bounds=[(0.3, 5), (0.3,5), (0.3, 5)]
+        cur_method='Powell'
         awbResult=minimize(
             loss,  # 包装loss函数
             x,  
             args=(imgLSC,area,fixGreen),
             # constraints=constraints,
-            # bounds=bounds,
-            method='Nelder-Mead',#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
+            bounds=bounds,
+            method=cur_method,#trust-constr SLSQP  L-BFGS-B TNC COBYLA_ Nelder-Mead Powell
             options={'maxiter': 10000,'disp': True}
         )
         if fixGreen:
@@ -865,67 +1086,27 @@ def autoFitAwb(image_folder,lscyamlFolder):
         # imgTmp=AWB_RGB(imgTmp,bestParam)
         color_means= calColor(imgTmp,area)
         # ccmCalib= CCM_3x4(color_means, IDEAL_LINEAR_RGB) 
-        ccmCalib= CCM_3x3(color_means, IDEAL_LINEAR_RGB) 
+        ccmCalib= CCM_3x3(color_means, CC_D50_2) 
         ccm= ccmCalib.infer_image()
         # imgTmp= ccmApply_3x4(imgTmp,ccm)
         imgTmp= ccmApply(imgTmp,ccm)
+
+        np.clip(imgTmp, 0, 1, out=imgTmp)
         imgTmp= Gamma(imgTmp)
-        error=calColorError(imgTmp,area)
-        if error < minError:
-            minError=error
-            bestCCM=ccm
-        print(f"当前误差: {error:.2f}, 最小误差: {minError:.2f}")
+        os.makedirs(savePath, exist_ok=True)
+
+        save_yaml_config(imgTmp,area,bestParam,ccm,savePath,basename)
+        
 
         imgTmp=imgTmp[...,::-1] # RGB转BGR
         imgTmp = np.clip(imgTmp * 255, 0, 255)
         imgTmp = imgTmp.astype(np.uint8)
-        os.makedirs(savePath, exist_ok=True)
-        imgSavePath=os.path.join(savePath, f"{basename}_error{error:.2f}.jpg")
+
+        imgSavePath=os.path.join(savePath, f"{basename}_{cur_method}_{'fixGreen' if fixGreen else 'nofixGreen'}.jpg")
         cv2.imwrite(imgSavePath, imgTmp)
-        bestParamx1e8=np.array(bestParam)*100000000
-        bestCCMx1e8= bestCCM*100000000
-        bestParamx1e8=bestParamx1e8.astype(np.int64)
-        bestCCMx1e8=bestCCMx1e8.astype(np.int64)
-        awbParamNormalized=bestParam/bestParam[1]
-        ccmNormalized= bestCCM*bestParam[1]
-        awbx1e8=awbParamNormalized*100000000
-        ccmx1e8= ccmNormalized*100000000
-        awbx1e8=awbx1e8.astype(np.int64)
-        ccmx1e8=ccmx1e8.astype(np.int64)
-        yamlConfig={
-            'awbParam': {
-                'R': float(f"{bestParam[3]:.4f}"),
-                'Gr': float(f"{bestParam[1]:.4f}"),
-                'Gb': float(f"{bestParam[2]:.4f}"),
-                'B': float(f"{bestParam[0]:.4f}"),
-            },
-            'CCM': bestCCM.tolist(),
-            'awbParam_x': {
-                'R': int(f"{bestParamx1e8[3]}"),
-                'Gr':int(f"{bestParamx1e8[1]}"),
-                'Gb':int(f"{bestParamx1e8[2]}"),
-                'B': int(f"{bestParamx1e8[0]}"),
-            },
-            'CCM_x': bestCCMx1e8.tolist(),
-            'Error': float(f"{minError:.4f}"),
-            'awbParamNormalized': {
-                'R': float(f"{awbParamNormalized[3]:.4f}"),
-                'Gr': float(f"{awbParamNormalized[1]:.4f}"),
-                'Gb': float(f"{awbParamNormalized[2]:.4f}"),
-                'B': float(f"{awbParamNormalized[0]:.4f}"),
-            },
-            'CCMNormalized': ccmNormalized.tolist(),
-            'awbParam_x100000000': {
-                'R': int(f"{awbx1e8[3]}"),
-                'Gr':int(f"{awbx1e8[1]}"),
-                'Gb':int(f"{awbx1e8[2]}"),
-                'B': int(f"{awbx1e8[0]}"),
-            },
-            'CCM_x100000000': ccmx1e8.tolist(),
-        }
-        yamlSavePath=os.path.join(savePath, f"{basename}_ispConfig")
-        saveYaml(yamlConfig,yamlSavePath)
-        print(f"最佳awb参数: {bestParam}, 最小色彩误差: {minError},最佳CCM:\n{npToString(bestCCM)}")    
+
+        
+       
 def autoFitLsc(image_folder):
 
     full_paths, basenames = get_paths(image_folder,suffix=".raw")
@@ -1036,8 +1217,8 @@ def main():
     # error=rgbError_detalE2000(IDEAL_RGB,ColorCheckerRGB)
     # print(f"初始色彩误差(2000): {error}")
 
-    folderPath= r'C:\WorkSpace\serialPortVisualization\data\1016_671\24nod50d75'
-    lscyamlFolder= r'C:\WorkSpace\serialPortVisualization\data\1016_G12_LSC'
+    folderPath= r'C:\WorkSpace\serialPortVisualization\data\1030G07S3_ColorChecker'
+    lscyamlFolder= r'C:\WorkSpace\serialPortVisualization\data\1011LSC'
     autoFitAwb(folderPath,lscyamlFolder)
 
 main()

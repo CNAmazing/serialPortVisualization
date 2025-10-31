@@ -19,7 +19,6 @@ def convert_numpy(obj):
         return obj
 def saveYaml(dictData, basename):
     
-    
     # 保存为 YAML 文件
     with open(f'{basename}.yaml', 'w') as f:
         yaml.dump(dictData, f, default_flow_style=None, sort_keys=False,width=float("inf"))

@@ -494,7 +494,7 @@ class SaturationModule(ISPModule):
             return frame_data
         
         # 计算灰度值 (使用标准RGB到灰度的转换)
-        gray = 0.299 * frame_data.image[..., 2] + 0.587 * frame_data.image[..., 1] + 0.114 * frame_data.image[..., 0]
+        gray = 0.2126*frame_data.image[...,2]+ 0.7152*frame_data.image[...,1]+ 0.0722*frame_data.image[...,0]
         
         # 饱和度调整公式: new_color = gray + saturation * (color - gray)
         for i in range(3):
@@ -733,8 +733,8 @@ def create_raw_pipeline() -> SimpleISPPipeline:
     pipeline.add_module(AWBRawModule())
     pipeline.add_module(DemosaicModule())
     pipeline.add_module(CCMModule())
-    pipeline.add_module(GammaModule())
     pipeline.add_module(SaturationModule())  # 添加饱和度模块
+    pipeline.add_module(GammaModule())
     pipeline.add_module(PPModule())
     pipeline.add_module(MetricModule())  # 添加质量评估模块
     return pipeline
@@ -777,8 +777,8 @@ if __name__ == "__main__":
     # 硬件配置: ispGainB = { 93594074, 97586706, 125773110, 132634347, 145515668 }
     wb_gain_config = {
         2800: {"r": 189736405/100000000, "g": 100000000/100000000, "b": 93594074/100000000},
-        3000: {"r": 206695329/100000000, "g": 100000000/100000000, "b": 97586706/100000000},
-        4000: {"r": 167125996/100000000, "g": 100000000/100000000, "b": 125773110/100000000},
+        3000: {"r": 182695329/100000000, "g": 100000000/100000000, "b": 98586706/100000000},
+        4000: {"r": 169125996/100000000, "g": 100000000/100000000, "b": 126773110/100000000},
         5000: {"r": 139812370/100000000, "g": 100000000/100000000, "b": 132634347/100000000},
         6000: {"r": 129124649/100000000, "g": 100000000/100000000, "b": 145515668/100000000}
     }
@@ -820,12 +820,12 @@ if __name__ == "__main__":
         height=1944,
         raw_bit=10,
         bayer_pattern="RGGB",
-        color_temperature=4000,  # 目标色温，会进行插值（硬件支持: 2800, 3000, 4000, 5000, 6000）
+        color_temperature=3000,  # 目标色温，会进行插值（硬件支持: 2800, 3000, 4000, 5000, 6000）
         lsc_gain=lsc_gain_config,
         wb_gain=wb_gain_config,
         ccm_matrix=ccm_config,
-        gamma=2.2,
-        saturation=1.8,  # 饱和度调整，1.0为原始饱和度，>1.0增加饱和度，<1.0降低饱和度
+        gamma=2.4,
+        saturation=1.0,  # 饱和度调整，1.0为原始饱和度，>1.0增加饱和度，<1.0降低饱和度
         blc_value=64
     )
 
@@ -833,7 +833,7 @@ if __name__ == "__main__":
     frame_data = FrameData(image=None, meta=meta)
 
     # 创建测试图像和元数据
-    image_path=r'C:\WorkSpace\serialPortVisualization\data\g07s5ColorChecker\CWF.raw'
+    image_path=r'C:\WorkSpace\serialPortVisualization\data\g07s5ColorChecker\U30.raw'
     image= readModule.process(frame_data,image_path=image_path)
     
     frame_data = FrameData(image=image, meta=meta)
