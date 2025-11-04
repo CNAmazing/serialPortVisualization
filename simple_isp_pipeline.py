@@ -25,7 +25,7 @@ class FrameMeta:
     lsc_gain: Dict[int, Dict[str, np.ndarray]] = None
     wb_gain:Dict[int,Dict[str,float]]=None
     ccm_matrix: Dict[int, np.ndarray] = None 
-    gamma: float = 2.2
+    gamma: float = 2.4
     saturation: float = 1.0
 
 @dataclass
@@ -738,89 +738,77 @@ def create_raw_pipeline() -> SimpleISPPipeline:
     pipeline.add_module(PPModule())
     pipeline.add_module(MetricModule())  # 添加质量评估模块
     return pipeline
-    
+def read_lsc_yaml(image_path):
+    yaml_data = loadYaml(image_path)
+    yaml_data_converted = {}
+    for key,value in yaml_data.items():
+        value=np.array(value, dtype=np.float32)
+        yaml_data[key]=value
+    return yaml_data
 # 使用示例
 if __name__ == "__main__":
-    print("简化版模块化ISP流水线")
+    print("Amazing ISP Pipeline")
     print("=" * 50)
     
-    # 创建流水线
-   
-    
-    # 创建色温相关的参数配置（按升序排列）
-    # LSC 增益图配置（按色温升序）
+    from tools import loadYaml
+
     lsc_gain_config = {
-        3000: {  # 暖光
-            "r": np.ones((20, 20)) * 1.0,
-            "gr": np.ones((20, 20)) * 1.0,
-            "gb": np.ones((20, 20)) * 1.0,
-            "b": np.ones((20, 20)) * 1.0
-        },
-        6500: {  # 日光
-            "r": np.ones((20, 20)) * 1.0,
-            "gr": np.ones((20, 20)) * 1.0,
-            "gb": np.ones((20, 20)) * 1.0,
-            "b": np.ones((20, 20)) * 1.0
-        },
-        10000: {  # 冷光
-            "r": np.ones((20, 20)) * 1.0,
-            "gr": np.ones((20, 20)) * 1.0,
-            "gb": np.ones((20, 20)) * 1.0,
-            "b": np.ones((20, 20)) * 1.0
-        }
+        2850: read_lsc_yaml(r'C:\WorkSpace\serialPortVisualization\data\1016_G12_LSC\977-A.yaml'),
+        3800: read_lsc_yaml(r'C:\WorkSpace\serialPortVisualization\data\1016_G12_LSC\977-TL84.yaml'),
+        5000: read_lsc_yaml(r'C:\WorkSpace\serialPortVisualization\data\1016_G12_LSC\977-D50.yaml'),
+        6500: read_lsc_yaml(r'C:\WorkSpace\serialPortVisualization\data\1016_G12_LSC\977-D65.yaml'),
     }
-    
     # 白平衡增益配置（按色温升序）- 基于硬件配置
     # 硬件配置: referenceColorTemp = { 2800, 3000, 4000, 5000, 6000 }
     # 硬件配置: ispGainR = { 189736405, 206695329, 167125996, 139812370, 129124649 }
     # 硬件配置: ispGainG = { 100000000, 100000000, 100000000, 100000000, 100000000 }
     # 硬件配置: ispGainB = { 93594074, 97586706, 125773110, 132634347, 145515668 }
     wb_gain_config = {
-        2800: {"r": 189736405/100000000, "g": 100000000/100000000, "b": 93594074/100000000},
-        3000: {"r": 182695329/100000000, "g": 100000000/100000000, "b": 98586706/100000000},
-        4000: {"r": 169125996/100000000, "g": 100000000/100000000, "b": 126773110/100000000},
-        5000: {"r": 139812370/100000000, "g": 100000000/100000000, "b": 132634347/100000000},
-        6000: {"r": 129124649/100000000, "g": 100000000/100000000, "b": 145515668/100000000}
+        2850: {"r": 200235400/100000000, "g": 100000000/100000000, "b": 93863200/100000000},
+        3800: {"r": 171858100/100000000, "g": 100000000/100000000, "b": 128985900/100000000},
+        4000: {"r": 179986100/100000000, "g": 100000000/100000000, "b": 139672200/100000000},
+        5000: {"r": 144411400/100000000, "g": 100000000/100000000, "b": 136771600/100000000},
+        6500: {"r": 128349900/100000000, "g": 100000000/100000000, "b": 163007200/100000000}
     }
     
     # CCM 矩阵配置（按色温升序）- 基于硬件配置
     # 硬件配置中的coeff数组，需要除以100000000进行归一化
     ccm_config = {
-        2800: np.array([
-            [158486495/100000000, 5098645/100000000, -63585141/100000000],
-            [-72519964/100000000, 228424003/100000000, -55904038/100000000],
-            [-34330875/100000000, -180267131/100000000, 314598007/100000000]
-        ], dtype=np.float32),
-        3000: np.array([
-            [168348840/100000000, -34550326/100000000, -33798514/100000000],
-            [-71885269/100000000, 212023354/100000000, -40138085/100000000],
-            [-19310425/100000000, -172367764/100000000, 291678189/100000000]
-        ], dtype=np.float32),
+        2850: np.array([
+            [195636082, -65563446, -30072638],
+            [-42741406, 188462245, -45720840],
+            [-55076260, -148995435, 304071700]
+        ], dtype=np.float32)/100000000,
+        3800: np.array([
+            [200623965, -100617993, -5970 ],
+            [-31185531, 173692667, -42507132],
+            [-16869554, -131106353, 247975900 ]
+        ], dtype=np.float32)/100000000,
         4000: np.array([
-            [218345353/100000000, -90674492/100000000, -27670861/100000000],
-            [-68515247/100000000, 196133526/100000000, -27618279/100000000],
-            [-19552679/100000000, -95922292/100000000, 215474972/100000000]
-        ], dtype=np.float32),
+            [218345353, -90674492, -27670861],
+            [-68515247, 196133526, -27618279],
+            [-19552679, -95922292, 215474972]
+        ], dtype=np.float32)/100000000,
         5000: np.array([
-            [188021296/100000000, -49049222/100000000, -38972074/100000000],
-            [-48422807/100000000, 202604457/100000000, -54181650/100000000],
-            [-16547936/100000000, -96709593/100000000, 213257530/100000000]
-        ], dtype=np.float32),
+            [188021296, -49049222, -38972074],
+            [-48422807, 202604457, -54181650],
+            [-16547936, -96709593, 213257530]
+        ], dtype=np.float32)/100000000,
         6000: np.array([
-            [192410599/100000000, -60013675/100000000, -32396923/100000000],
-            [-42183644/100000000, 196039632/100000000, -53855987/100000000],
-            [-13275632/100000000, -87542089/100000000, 200817722/100000000]
-        ], dtype=np.float32)
+            [192410599, -60013675, -32396923],
+            [-42183644, 196039632, -53855987],
+            [-13275632, -87542089, 200817722]
+        ], dtype=np.float32)/100000000
     }
     pipeline = create_raw_pipeline()
     pipeline.print_pipeline_info()
 
     meta = FrameMeta(
-        width=2592,
-        height=1944,
+        width=4096,
+        height=3072,
         raw_bit=10,
         bayer_pattern="RGGB",
-        color_temperature=3000,  # 目标色温，会进行插值（硬件支持: 2800, 3000, 4000, 5000, 6000）
+        color_temperature=5000,  # 目标色温，会进行插值（硬件支持: 2800, 3000, 4000, 5000, 6000）
         lsc_gain=lsc_gain_config,
         wb_gain=wb_gain_config,
         ccm_matrix=ccm_config,
@@ -833,11 +821,10 @@ if __name__ == "__main__":
     frame_data = FrameData(image=None, meta=meta)
 
     # 创建测试图像和元数据
-    image_path=r'C:\WorkSpace\serialPortVisualization\data\g07s5ColorChecker\U30.raw'
+    image_path=r'C:\WorkSpace\serialPortVisualization\data\1016_671\d50\671-D50.raw'
     image= readModule.process(frame_data,image_path=image_path)
     
     frame_data = FrameData(image=image, meta=meta)
-    
     
     # 处理图像
     result = pipeline.process(frame_data)

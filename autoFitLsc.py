@@ -876,7 +876,6 @@ def calColorError(img,area):
     ])
     error=rgbError_detalE2000(avg_colors,CC_D50_2)
     
-    error=error
     error=np.mean(error)
     return error
 def calColorError_ColorChecker(img,area,):
@@ -960,16 +959,14 @@ def save_yaml_config(image,area,awb,ccm,save_path,basename):
         },
         'ccm_x1e8': ccmx1e8.tolist(),
         'errors': np.round(errors, 2).tolist(),
-        'avgError': float(f"{avgError:.4f}"),
-        'minError': float(f"{minError:.4f}"),
-        'maxError': float(f"{maxError:.4f}"),
-        'errorStats': error_stats,  # 按十位数区间统计的个数
+        'avgError': float(f"{avgError:.2f}"),
+        'minError': float(f"{minError:.2f}"),
+        'maxError': float(f"{maxError:.2f}"),
+        'errorStats': error_stats,  
         'saturation':np.round(saturation, 2).tolist(),
     }
     yamlSavePath=os.path.join(save_path, f"{basename}_avgError{avgError:.2f}")
     saveYaml(yamlConfig,yamlSavePath)
-
-
 
 def autoFitAwb(image_folder,lscyamlFolder):
     fixGreen= True
@@ -1048,9 +1045,7 @@ def autoFitAwb(image_folder,lscyamlFolder):
         lsc_strength=1
         # imgLSC=LSC(img,gainList,strength=[lsc_strength,lsc_strength,lsc_strength,lsc_strength])
         imgLSC=img
-        minError=float('inf')
-        bestParam=None
-        bestCCM=None
+        awbParam=None
         saveFolderName='ispResults'
         savePath=os.path.join(image_folder,saveFolderName)
         if fixGreen:
@@ -1074,11 +1069,11 @@ def autoFitAwb(image_folder,lscyamlFolder):
             g=1.0
         else:
             r,g,b=awbResult.x
-        bestParam=[b,g,g,r]
-        bestParam=np.array(bestParam)
+        awbParam=[b,g,g,r]
+        awbParam=np.array(awbParam)
         print(f"优化结果: {awbResult}")
         # imgTmp= AWB(imgLSC,bestParam)  # 假设红蓝通道增益为1.0
-        imgTmp= AWB(imgLSC,bestParam)  # 假设红蓝通道增益为1.0
+        imgTmp= AWB(imgLSC,awbParam)  # 假设红蓝通道增益为1.0
         imgTmp=Demosaic(imgTmp)
         imgTmp = imgTmp.astype(np.float64)
         np.clip(imgTmp, 0, 1023, out=imgTmp)
@@ -1094,8 +1089,7 @@ def autoFitAwb(image_folder,lscyamlFolder):
         np.clip(imgTmp, 0, 1, out=imgTmp)
         imgTmp= Gamma(imgTmp)
         os.makedirs(savePath, exist_ok=True)
-
-        save_yaml_config(imgTmp,area,bestParam,ccm,savePath,basename)
+        save_yaml_config(imgTmp,area,awbParam,ccm,savePath,basename)
         
 
         imgTmp=imgTmp[...,::-1] # RGB转BGR
@@ -1112,7 +1106,6 @@ def autoFitLsc(image_folder):
     full_paths, basenames = get_paths(image_folder,suffix=".raw")
     Rrange= np.arange(0.8, 1.8, 0.15)  
     Brange= np.arange(1.2, 1.8, 0.15)  
-
     yamlFolder= r'C:\WorkSpace\serialPortVisualization\data\0901lscConfig2'
     area=[[710, 471, 840, 601], [965, 471, 1095, 601], [1220, 471, 1350, 601], [1475, 471, 1605, 601], [1730, 471, 1860, 601], [1985, 471, 2115, 601], [710, 726, 840, 856], [965, 726, 1095, 856], [1220, 726, 1350, 856], [1475, 726, 1605, 856], [1730, 726, 1860, 856], [1985, 726, 2115, 856], [710, 981, 840, 1111], [965, 981, 1095, 1111], [1220, 981, 1350, 1111], [1475, 981, 1605, 1111], [1730, 981, 1860, 1111], [1985, 981, 2115, 1111], [710, 1236, 840, 1366], [965, 1236, 1095, 1366], [1220, 1236, 1350, 1366], [1475, 1236, 1605, 1366], [1730, 1236, 1860, 1366], [1985, 1236, 2115, 1366]]
 
@@ -1211,9 +1204,7 @@ def autoFitLsc(image_folder):
         saveYaml(yamlConfig,yamlSavePath)
         print(f"最佳awb参数: {bestParam}, 最小色彩误差: {minError},最佳CCM:\n{npToString(bestCCM)}")    
 def main():
-   
     # autoFitLsc(folderPath)
-
     # error=rgbError_detalE2000(IDEAL_RGB,ColorCheckerRGB)
     # print(f"初始色彩误差(2000): {error}")
 
