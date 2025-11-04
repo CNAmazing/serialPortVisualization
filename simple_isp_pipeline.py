@@ -434,6 +434,11 @@ class CCMModule(ISPModule):
                 
                 # 矩阵插值
                 ccm_interp = ccm1 + weight * (ccm2 - ccm1)
+                saturation = 1.0
+                w = np.array([0.2126, 0.7152, 0.0722])
+                E=np.eye(3)
+                sat_matrix = (1-saturation)*w+saturation*E  
+                ccm_interp = ccm_interp @ sat_matrix
                 return ccm_interp.astype(np.float32)
         
         return ccm_config[temps[0]]
