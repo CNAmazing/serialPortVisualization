@@ -1,102 +1,50 @@
 import numpy as np
-from scipy.optimize import minimize
 import matplotlib.pyplot as plt
+from colour.temperature.mccamy1992 import xy_to_CCT_McCamy1992
+from colour.temperature.hernandez1999 import xy_to_CCT_Hernandez1999
+from colour.temperature.ohno2013 import XYZ_to_CCT_Ohno2013
+from colour.models import xy_to_XYZ
 
-def f(x):
-    """目标二次函数"""
-    return x**3
+# -----------------------------
+# 1. 随机生成 xy 数据
+# -----------------------------
+np.random.seed(42)  # 为了可重复
+num_points = 100
 
-def segment_max_error(x_points, i):
-    """计算第i个线段的最大误差"""
-    x_left, x_right = x_points[i], x_points[i+1]
-    y_left, y_right = f(x_left), f(x_right)
-    
-    # 定义线性插值函数
-    def line_func(x):
-        slope = (y_right - y_left) / (x_right - x_left)
-        return y_left + slope * (x - x_left)
-    
-    # 定义误差函数
-    def error_func(x):
-        return np.abs(f(x) - line_func(x))
-    
-    # 在当前线段区间内寻找最大误差
-    from scipy.optimize import minimize_scalar
-    res = minimize_scalar(error_func, bounds=(x_left, x_right), method='bounded')
-    return -res.fun  # 返回最大误差值
+# xy 坐标合理范围：x约[0.25,0.45], y约[0.25,0.45]
+x_rand = np.random.uniform(0.25, 0.45, num_points)
+y_rand = np.random.uniform(0.25, 0.45, num_points)
+xy_list = np.stack([x_rand, y_rand], axis=1)
 
-def objective_function(x_internal, x_start=1, x_end=9):
-    """
-    目标函数：最小化所有线段中的最大误差
-    x_internal: 需要优化的内部点（决策变量）
-    """
-    # 构建完整的分段点（包括固定的起点和终点）
-    x_points = np.concatenate([[x_start], x_internal, [x_end]])
-    n_segments = len(x_points) - 1
-    
-    # 计算每个线段的最大误差
-    max_errors = [segment_max_error(x_points, i) for i in range(n_segments)]
-    
-    # 返回所有线段中的最大误差（这是我们要最小化的目标）
-    return max(max_errors)
+# -----------------------------
+# 2. 用不同方法计算 CCT
+# -----------------------------
+CCT_mccamy = np.array([xy_to_CCT_McCamy1992(xy) for xy in xy_list])
+CCT_hernandez = np.array([xy_to_CCT_Hernandez1999(xy) for xy in xy_list])
+# xy -> XYZ -> Ohno2013 CCT
+CCT_ohno = np.array([XYZ_to_CCT_Ohno2013(xy_to_XYZ(xy))[0] for xy in xy_list])
 
-# 使用scipy.optimize.minimize进行优化
-def optimize_with_scipy(n_segments, x_start=1, x_end=9):
-    """
-    使用scipy的minimize函数进行优化
-    n_segments: 线段数量
-    返回: 优化后的分段点
-    """
-    n_internal_points = n_segments - 1  # 需要优化的内部点数量
-    
-    # 初始猜测：均匀分布的内部点
-    x0 = np.linspace(x_start, x_end, n_segments + 1)[1:-1]
-     
-    # 定义约束：内部点必须按顺序排列且在区间内
-    bounds = [(x_start, x_end)] * n_internal_points
-    
-    # 使用优化算法（SLSQP或trust-constr适合有约束的问题）
-    result = minimize(
-        objective_function, 
-        x0, 
-        bounds=bounds,
-        method='SLSQP',
-        options={'disp': True, 'ftol': 1e-8}
-    )
-    if result.success:
-        optimized_internal = result.x
-        optimized_points = np.concatenate([[x_start], optimized_internal, [x_end]])
-        min_error = result.fun
-        return optimized_points, min_error
-    else:
-        raise ValueError("优化失败: " + result.message)
 
-# 使用示例
-n_segments = 4  # 3段线
-x_start, x_end = 1, 9
+# -----------------------------
+# 3. 打印部分对比
+# -----------------------------
+print("x       y       McCamy   Hernandez   Ohno")
+for i in range(0, num_points, 5):
+    print(f"{xy_list[i,0]:.3f}  {xy_list[i,1]:.3f}  "
+          f"{CCT_mccamy[i]:8.2f}  {CCT_hernandez[i]:10.2f}  {CCT_ohno[i]:8.2f}")
 
-optimized_points, min_error = optimize_with_scipy(n_segments, x_start, x_end)
-
-print(f"优化后的分段点: {optimized_points}")
-print(f"最小最大误差: {min_error:.8f}")
-
-# 可视化最终结果
-plt.figure(figsize=(10, 6))
-x_plot = np.linspace(x_start, x_end, 1000)
-y_func = f(x_plot)
-
-plt.plot(x_plot, y_func, 'b-', label='f(x) = x²', linewidth=2)
-
-# 绘制拟合的多段线
-for i in range(len(optimized_points) - 1):
-    x_seg = [optimized_points[i], optimized_points[i+1]]
-    y_seg = [f(optimized_points[i]), f(optimized_points[i+1])]
-    plt.plot(x_seg, y_seg, 'r-', linewidth=2, label='拟合线段' if i == 0 else "")
-    plt.plot(x_seg, y_seg, 'ro', markersize=6)
-
-plt.xlabel('x')
-plt.ylabel('y')
-plt.title(f'二次函数的多段线拟合 (最大误差: {min_error:.6f})')
+# -----------------------------
+# 4. 绘图比较
+# -----------------------------
+plt.figure(figsize=(8, 5))
+plt.plot(range(num_points), CCT_mccamy, 'o-', label="McCamy1992")
+plt.plot(range(num_points), CCT_hernandez, 's-', label="Hernandez1999")
+plt.plot(range(num_points), CCT_ohno, 'x-', label="Ohno2013")
+plt.xlabel("Sample index")
+plt.ylabel("Calculated CCT (K)")
+plt.title("CCT Calculation Comparison on Random xy")
 plt.legend()
 plt.grid(True)
 plt.show()
+
+

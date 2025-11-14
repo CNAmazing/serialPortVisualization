@@ -3,19 +3,19 @@ import matplotlib.pyplot as plt
 from tools import readRaw
 # 1. 读取一张图像
 # image = cv2.imread(r'C:\WorkSpace\serialPortVisualization\data\g07s5ColorChecker\demosaicResults\A.jpg')
-image_path=r'C:\WorkSpace\serialPortVisualization\data\1030G07S3_ColorChecker\D60.raw'
-image=readRaw(image_path,1200,1600)
+image_path=r'C:\WorkSpace\serialPortVisualization\data\g07s5ColorChecker\A.raw'
+image=readRaw(image_path,1944,2592)
 # 将BGR格式转换为RGB格式（Matplotlib使用RGB）
 image_rgb = image
 # image_rgb = cv2.cvtColor(image, cv2.IMREAD_UNCHANGED)
 
 # 2. 定义矩形的参数s
-boxSize = 70
-interval = 115
+boxSize = 120
+interval = 135
 
 # 起始坐标（第一个方块的左上角）
-start_x =312
-start_y = 285
+start_x =735
+start_y = 490
 boxList=[]
 # 3. 循环生成24个等距离的矩形（6行4列）
 for idx in range(24):

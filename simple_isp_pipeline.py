@@ -817,7 +817,7 @@ if __name__ == "__main__":
         lsc_gain=lsc_gain_config,
         wb_gain=wb_gain_config,
         ccm_matrix=ccm_config,
-        gamma=2.4,
+        gamma=2.2,
         saturation=1.0,  # 饱和度调整，1.0为原始饱和度，>1.0增加饱和度，<1.0降低饱和度
         blc_value=64
     )
